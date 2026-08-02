@@ -1,0 +1,25 @@
+{
+  "name": "clidanfi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema de gestión para clínica de fisioterapia CLIDANFI",
+  "scripts": {
+    "postinstall": "node scripts/vendor.js",
+    "env": "node scripts/generate-env.js",
+    "vendor": "node scripts/vendor.js",
+    "css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --minify",
+    "css:watch": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --watch",
+    "dev": "npm run env && npm run vendor && npm run css:watch",
+    "build": "node scripts/build.js",
+    "serve": "npx --yes http-server dist -p 8080 -c-1"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

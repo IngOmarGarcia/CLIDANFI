@@ -1,0 +1,411 @@
+/* ==========================================================================
+   CLIDANFI · app.js  ·  ROUTER + SHELL + GUARDIA DE SESIÓN
+   - Sin sesión válida NO se renderiza ninguna vista salvo la de acceso.
+   - El rol viene del perfil del usuario, nunca de un control de la interfaz.
+   - Cada ruta declara qué rol la puede abrir; entrar por URL a una ruta ajena
+     redirige al inicio del propio rol.
+   ========================================================================== */
+(function (global) {
+  'use strict';
+
+  const { icon, escapeHtml: E, avatar, toast, openSheet, closeSheet, confirmSheet } = UI;
+
+  /* ======================================================================
+     RUTAS  ·  `rol` es la autorización de la pantalla
+     ====================================================================== */
+  const RUTAS = [
+    // Fisioterapeuta
+    { patron: /^\/t\/dashboard$/,            vista: () => VistaFisio.dashboard,    rol: 'fisio' },
+    { patron: /^\/t\/agenda$/,               vista: () => VistaFisio.agenda,       rol: 'fisio' },
+    { patron: /^\/t\/pacientes$/,            vista: () => VistaFisio.pacientes,    rol: 'fisio' },
+    { patron: /^\/t\/paciente\/([^/?]+)$/,   vista: () => VistaFisio.paciente,     rol: 'fisio', claves: ['id'] },
+    { patron: /^\/t\/valoracion\/([^/?]+)$/, vista: () => VistaFisio.valoracion,   rol: 'fisio', claves: ['id'] },
+    { patron: /^\/t\/rutina\/([^/?]+)$/,     vista: () => VistaFisio.rutinaEditor, rol: 'fisio', claves: ['id'] },
+    { patron: /^\/t\/sorteos$/,              vista: () => VistaFisio.sorteos,      rol: 'fisio' },
+    // Paciente
+    { patron: /^\/p\/inicio$/,               vista: () => VistaPaciente.inicio,      rol: 'paciente' },
+    { patron: /^\/p\/rutina$/,               vista: () => VistaPaciente.rutina,      rol: 'paciente' },
+    { patron: /^\/p\/promociones$/,          vista: () => VistaPaciente.promociones, rol: 'paciente' },
+    { patron: /^\/p\/sorteos$/,              vista: () => VistaPaciente.sorteos,     rol: 'paciente' }
+  ];
+
+  const NAV = {
+    fisio: [
+      { href: '#/t/dashboard', icono: 'home',     label: 'Inicio' },
+      { href: '#/t/agenda',    icono: 'calendar', label: 'Agenda' },
+      { href: '#/t/pacientes', icono: 'users',    label: 'Pacientes' },
+      { href: '#/t/sorteos',   icono: 'gift',     label: 'Sorteos' }
+    ],
+    paciente: [
+      { href: '#/p/inicio',      icono: 'home',     label: 'Inicio' },
+      { href: '#/p/rutina',      icono: 'dumbbell', label: 'Mi rutina' },
+      { href: '#/p/promociones', icono: 'tag',      label: 'Promos' },
+      { href: '#/p/sorteos',     icono: 'ticket',   label: 'Sorteos' }
+    ]
+  };
+
+  const INICIO = { fisio: '#/t/dashboard', paciente: '#/p/inicio' };
+
+  /* ======================================================================
+     ESTADO
+     ====================================================================== */
+  const estado = {
+    sesion: null,   // { user, perfil }
+    ruta: null,
+    renderizando: false
+  };
+
+  const rol = () => (estado.sesion ? estado.sesion.perfil.rol : null);
+  const autenticado = () => !!estado.sesion;
+
+  /* ======================================================================
+     HASH
+     ====================================================================== */
+  function parseHash(hashPreferido) {
+    const raw = (hashPreferido || location.hash || '').replace(/^#/, '');
+    if (!raw) return null;
+    const [path, qs = ''] = raw.split('?');
+    const query = Object.fromEntries(new URLSearchParams(qs));
+
+    for (const r of RUTAS) {
+      const m = path.match(r.patron);
+      if (m) {
+        const params = {};
+        (r.claves || []).forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
+        return { def: r, params, query, path };
+      }
+    }
+    return null;
+  }
+
+  /* ======================================================================
+     RENDER
+     ====================================================================== */
+  async function render() {
+    if (estado.renderizando) return;
+    estado.renderizando = true;
+
+    const root = document.getElementById('view-root');
+
+    try {
+      /* --- Puerta: sin sesión, solo la pantalla de acceso --------------- */
+      if (!autenticado()) {
+        estado.ruta = null;
+        const vista = await VistaAuth.login();
+        mostrarChrome(false);
+        root.innerHTML = vista.html;
+        window.scrollTo(0, 0);
+        if (vista.onMount) vista.onMount(root);
+        return;
+      }
+
+      /* --- Autorización de la ruta -------------------------------------- */
+      let ruta = parseHash();
+      if (!ruta || ruta.def.rol !== rol()) {
+        // Ruta inexistente o de otro rol: al inicio del rol propio.
+        if (ruta && ruta.def.rol !== rol()) {
+          console.warn('[CLIDANFI] Ruta no autorizada para el rol actual:', ruta.path);
+        }
+        location.hash = INICIO[rol()];
+        ruta = parseHash();
+        if (!ruta) return;
+      }
+      estado.ruta = ruta;
+
+      const resultado = await ruta.def.vista()(ruta.params, ruta.query);
+
+      mostrarChrome(true);
+      root.innerHTML = resultado.html;
+      window.scrollTo(0, 0);
+
+      pintarBarraContexto(resultado);
+      pintarNav();
+      pintarUsuario();
+
+      if (resultado.onMount) resultado.onMount(root);
+    } catch (err) {
+      console.error('[CLIDANFI] Error al renderizar:', err);
+      pintarError(root, err);
+    } finally {
+      estado.renderizando = false;
+    }
+  }
+
+  function pintarError(root, err) {
+    const denegado = /Acceso denegado|Sesión no iniciada/i.test(err.message || '');
+    root.innerHTML = `
+      <div class="p-4">
+        <div class="rounded-2xl border ${denegado ? 'border-amber-200 bg-amber-50' : 'border-rose-200 bg-rose-50'} p-4">
+          <p class="flex items-center gap-2 text-[13px] font-extrabold ${denegado ? 'text-amber-800' : 'text-rose-800'}">
+            ${icon(denegado ? 'lock' : 'alert', 'h-4 w-4')} ${denegado ? 'Acceso restringido' : 'Ocurrió un error'}
+          </p>
+          <p class="mt-1 text-[12px] ${denegado ? 'text-amber-700' : 'text-rose-700'}">${E(err.message || String(err))}</p>
+          <div class="mt-3 flex gap-2">
+            <button data-action="ir-inicio" class="rounded-lg bg-ink-800 px-3 py-2 text-[12.5px] font-bold text-white">Volver al inicio</button>
+            ${denegado ? '' : `<button data-action="reiniciar-datos" class="rounded-lg bg-rose-600 px-3 py-2 text-[12.5px] font-bold text-white">Reiniciar datos</button>`}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /** Muestra u oculta cabecera y navegación (la pantalla de acceso va limpia). */
+  function mostrarChrome(visible) {
+    document.getElementById('app-header').classList.toggle('hidden', !visible);
+    document.getElementById('bottom-nav').classList.toggle('hidden', !visible);
+    document.getElementById('view-root').classList.toggle('pb-28', visible);
+  }
+
+  function pintarBarraContexto(resultado) {
+    const bar = document.getElementById('context-bar');
+    const sub = document.getElementById('header-subtitle');
+    const esRaiz = NAV[rol()].some((n) => n.href === '#' + estado.ruta.path);
+
+    sub.textContent = rol() === 'fisio' ? 'Panel del fisioterapeuta' : 'Portal del paciente';
+
+    if (esRaiz && !resultado.volver) {
+      bar.classList.add('hidden');
+      bar.classList.remove('flex');
+      bar.innerHTML = '';
+      return;
+    }
+
+    bar.classList.remove('hidden');
+    bar.classList.add('flex');
+    bar.innerHTML = `
+      <button data-action="volver" data-href="${E(resultado.volver || '')}" aria-label="Volver"
+        class="grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-600 active:bg-ink-100">
+        ${icon('arrowLeft', 'h-5 w-5')}
+      </button>
+      <p class="min-w-0 flex-1 truncate text-[14px] font-extrabold text-ink-900">${E(resultado.titulo || '')}</p>`;
+  }
+
+  function pintarNav() {
+    const nav = document.getElementById('bottom-nav');
+    const actual = '#' + estado.ruta.path;
+
+    nav.innerHTML = `
+      <div class="nav-safe flex items-stretch justify-around px-2 pt-2">
+        ${NAV[rol()].map((it) => {
+          const on = actual === it.href;
+          return `
+            <a href="${it.href}" class="nav-item flex flex-1 flex-col items-center gap-1 py-1" ${on ? 'aria-current="page"' : ''}>
+              <span class="nav-icon-wrap grid h-7 w-14 place-items-center rounded-full transition">${icon(it.icono, 'h-5 w-5')}</span>
+              <span class="text-[10px] font-bold leading-none">${E(it.label)}</span>
+            </a>`;
+        }).join('')}
+      </div>`;
+  }
+
+  /** Chip del usuario en la cabecera (sustituye al antiguo switch de rol). */
+  function pintarUsuario() {
+    const cont = document.getElementById('user-chip');
+    const nombre = estado.sesion.perfil.nombre || estado.sesion.user.email;
+    cont.innerHTML = `
+      <button data-action="abrir-cuenta" aria-label="Mi cuenta"
+        class="flex items-center gap-2 rounded-full bg-ink-100 py-1 pl-1 pr-2.5 active:scale-95">
+        ${avatar(nombre, 'h-7 w-7 text-[10px]')}
+        <span class="max-w-[80px] truncate text-[11px] font-bold text-ink-700">${E(nombre.split(' ')[0])}</span>
+      </button>`;
+  }
+
+  /* ======================================================================
+     SESIÓN
+     ====================================================================== */
+
+  /** Arranca (o rearranca) la app tras un inicio de sesión correcto. */
+  async function entrar() {
+    estado.sesion = await API.auth.sesion();
+    if (!estado.sesion) return render();
+    // Cada rol aterriza en su propia pantalla de inicio.
+    const destino = INICIO[rol()];
+    if (location.hash !== destino) location.hash = destino;
+    else await render();
+  }
+
+  async function salir() {
+    const ok = await confirmSheet({
+      title: 'Cerrar sesión',
+      message: '¿Seguro que quieres salir de tu cuenta?',
+      confirmText: 'Cerrar sesión'
+    });
+    if (!ok) return;
+
+    await API.auth.salir();
+    estado.sesion = null;
+    // Limpia el hash para no dejar rastro de la última pantalla visitada.
+    history.replaceState(null, '', location.pathname + location.search);
+    await render();
+    toast('Sesión cerrada');
+  }
+
+  function sheetCuenta() {
+    const p = estado.sesion.perfil;
+    const conectado = API._impl === 'supabase';
+
+    openSheet({
+      title: 'Mi cuenta',
+      subtitle: estado.sesion.user.email,
+      body: `
+        <div class="space-y-2">
+          <div class="flex items-center gap-3 rounded-xl bg-brand-50 p-3">
+            ${avatar(p.nombre || estado.sesion.user.email, 'h-11 w-11 text-[13px]')}
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-[14px] font-extrabold text-brand-900">${E(p.nombre || '—')}</p>
+              <p class="text-[11.5px] font-bold uppercase tracking-wide text-brand-700">
+                ${p.rol === 'fisio' ? 'Fisioterapeuta' : 'Paciente'}
+              </p>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-2.5 rounded-xl border ${conectado ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'} p-3">
+            <span class="mt-0.5 ${conectado ? 'text-emerald-600' : 'text-amber-600'}">${icon('shield', 'h-4 w-4')}</span>
+            <div class="min-w-0">
+              <p class="text-[12.5px] font-extrabold ${conectado ? 'text-emerald-800' : 'text-amber-800'}">
+                ${conectado ? 'Conectado a Supabase' : 'Modo demostración'}
+              </p>
+              <p class="mt-0.5 text-[11.5px] leading-snug ${conectado ? 'text-emerald-700' : 'text-amber-700'}">
+                ${conectado
+                  ? 'Tus datos viajan cifrados y el acceso lo controlan las políticas RLS del servidor.'
+                  : 'Los datos viven solo en este navegador. Configura SUPABASE_URL y SUPABASE_ANON_KEY para usarlo en producción.'}
+              </p>
+            </div>
+          </div>
+
+          ${!conectado ? `
+            <button data-action="reiniciar-datos" class="flex w-full items-center gap-3 rounded-xl border border-ink-200 p-3 text-left active:bg-ink-50">
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-ink-100 text-ink-600">${icon('refresh', 'h-4 w-4')}</span>
+              <span class="text-[13.5px] font-bold text-ink-700">Reiniciar datos de prueba</span>
+            </button>` : ''}
+
+          <button data-action="cerrar-sesion" class="flex w-full items-center gap-3 rounded-xl border border-rose-200 p-3 text-left active:bg-rose-50">
+            <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-rose-100 text-rose-600">${icon('logout', 'h-4 w-4')}</span>
+            <span class="text-[13.5px] font-bold text-rose-600">Cerrar sesión</span>
+          </button>
+        </div>`,
+      onMount: (root) => root.querySelectorAll('[data-action]').forEach((b) =>
+        b.addEventListener('click', () => closeSheet()))
+    });
+  }
+
+  /* ======================================================================
+     DELEGACIÓN DE EVENTOS  ·  data-action="…"
+     ====================================================================== */
+  const ACCIONES = {
+    /* --- sesión y navegación --- */
+    'abrir-cuenta':  () => sheetCuenta(),
+    'cerrar-sesion': () => salir(),
+    'ir-inicio':     () => { location.hash = INICIO[rol()] || ''; render(); },
+    'volver':        (el) => { if (el.dataset.href) location.hash = el.dataset.href; else history.back(); },
+
+    /* --- pacientes --- */
+    'nuevo-paciente':   () => VistaFisio.sheetPaciente(),
+    'editar-paciente':  (el) => VistaFisio.sheetPaciente(el.dataset.id),
+    'limpiar-busqueda': () => { const i = document.getElementById('buscador-pacientes'); if (i) { i.value = ''; i.dispatchEvent(new Event('input')); } },
+
+    /* --- agenda --- */
+    'nueva-cita': (el) => VistaFisio.sheetCita(el.dataset.id || null),
+    'cita-menu':  (el) => VistaFisio.sheetMenuCita(el.dataset.id),
+
+    /* --- clínico --- */
+    'registrar-asistencia': (el) => VistaFisio.sheetAsistencia(el.dataset.id),
+    'abrir-valoracion':     (el) => { location.hash = `#/t/valoracion/${el.dataset.id}`; },
+    'nueva-nota':           (el) => VistaFisio.sheetNota(el.dataset.id),
+    'ver-foto':             (el) => VistaFisio.sheetFoto(el.dataset.url, el.dataset.titulo),
+
+    'borrar-nota': async (el) => {
+      const ok = await confirmSheet({ title: 'Eliminar nota', message: '¿Eliminar esta nota de evolución y sus adjuntos?', confirmText: 'Eliminar', tone: 'danger' });
+      if (ok) { await API.eliminarNota(el.dataset.id); toast('Nota eliminada'); render(); }
+    },
+
+    'guardar-valoracion': async (el) => {
+      const root = document.getElementById('view-root');
+      const { secciones_activas, datos } = VistaFisio.leerValoracion(root);
+      await API.guardarValoracion(el.dataset.id, { secciones_activas, datos, id: el.dataset.vid || null });
+      toast('Valoración guardada');
+      location.hash = `#/t/paciente/${el.dataset.id}?tab=valoracion`;
+    },
+
+    /* --- rutinas --- */
+    'abrir-rutina':   (el) => { location.hash = `#/t/rutina/${el.dataset.id}`; },
+    'editar-rutina':  (el) => { location.hash = `#/t/rutina/${el.dataset.id}?rid=${el.dataset.rid}`; },
+    'activar-rutina': async (el) => { await API.activarRutina(el.dataset.id); toast('Rutina marcada como activa'); render(); },
+
+    'borrar-rutina': async (el) => {
+      const ok = await confirmSheet({ title: 'Eliminar rutina', message: 'Se eliminará esta versión de la rutina del historial.', confirmText: 'Eliminar', tone: 'danger' });
+      if (ok) { await API.eliminarRutina(el.dataset.id); toast('Rutina eliminada'); render(); }
+    },
+
+    'guardar-rutina': async (el) => {
+      const root = document.getElementById('view-root');
+      const items = global.__rutinaSeleccion || [];
+      if (!items.length) return toast('Agrega al menos un ejercicio', 'error');
+      const titulo = root.querySelector('#rut-titulo').value.trim() || 'Rutina sin título';
+      const notas = root.querySelector('#rut-notas').value.trim();
+      await API.guardarRutina(el.dataset.id, { titulo, notas, items, id: el.dataset.rid || null });
+      global.__rutinaSeleccion = null;
+      toast('Rutina guardada y activada');
+      location.hash = `#/t/paciente/${el.dataset.id}?tab=rutinas`;
+    },
+
+    /* --- sorteos y promociones --- */
+    'nuevo-sorteo':      () => VistaFisio.sheetSorteo(),
+    'editar-sorteo':     (el) => VistaFisio.sheetSorteo(el.dataset.id),
+    'ver-participantes': (el) => VistaFisio.sheetParticipantes(el.dataset.id),
+    'realizar-sorteo':   (el) => VistaFisio.ejecutarSorteo(el.dataset.id),
+    'publicar-sorteo':   async (el) => {
+      await API.publicarGanador(el.dataset.id, el.dataset.pub === '1');
+      toast(el.dataset.pub === '1' ? 'Ganador publicado' : 'Ganador oculto');
+      render();
+    },
+    'ver-promos':  () => VistaFisio.sheetPromos(),
+    'nueva-promo': () => VistaFisio.sheetPromoForm(),
+
+    /* --- utilidades --- */
+    'reiniciar-datos': async () => {
+      const ok = await confirmSheet({
+        title: 'Reiniciar datos de prueba',
+        message: 'Se borrará todo lo capturado en este navegador y se volverá a generar la información mínima de demostración.',
+        confirmText: 'Reiniciar', tone: 'danger'
+      });
+      if (ok) { Store.reset(); toast('Datos reiniciados'); render(); }
+    }
+  };
+
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const fn = ACCIONES[el.dataset.action];
+    if (!fn) return;
+    e.preventDefault();
+    Promise.resolve(fn(el, e)).catch((err) => {
+      console.error('[CLIDANFI]', err);
+      toast(err.message || 'No se pudo completar la acción', 'error', 4000);
+    });
+  });
+
+  /* ======================================================================
+     ARRANQUE
+     ====================================================================== */
+  window.addEventListener('hashchange', () => { closeSheet(); render(); });
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    Store.load();
+
+    // Cambios de sesión desde fuera (otra pestaña, token expirado en Supabase)
+    API.auth.onCambio(async (sesion) => {
+      const antes = estado.sesion ? estado.sesion.user.id : null;
+      const ahora = sesion ? sesion.user.id : null;
+      if (antes === ahora) return;
+      estado.sesion = sesion;
+      closeSheet();
+      await render();
+    });
+
+    estado.sesion = await API.auth.sesion();
+
+    if (autenticado() && !location.hash) location.hash = INICIO[rol()];
+    render();
+  });
+
+  global.App = { render, entrar, salir, get rol() { return rol(); }, get sesion() { return estado.sesion; } };
+})(window);

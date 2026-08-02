@@ -1,0 +1,39 @@
+CLIDANFI · Carpeta de recursos
+================================
+
+1) LOGO DE LA CLÍNICA
+---------------------
+Coloca aquí el archivo del logo con este nombre exacto:
+
+    logo-clidanfi.svg     (recomendado: vectorial, se ve nítido en cualquier pantalla)
+
+o bien:
+
+    logo-clidanfi.png     (mínimo 132 × 132 px para pantallas retina)
+
+Si usas PNG, cambia la extensión en el <img> de index.html:
+
+    <img id="brand-logo" src="./assets/logo-clidanfi.png" ... >
+
+Mientras el archivo no exista, el <img> muestra automáticamente un recuadro
+punteado con la palabra "LOGO" (definido en css/styles.css → .logo-fallback).
+No se inventó ningún logo: la etiqueta está lista y vacía, esperando el tuyo.
+
+El logo se muestra a 44 × 44 px en la cabecera. Un formato cuadrado o
+circular con márgenes internos funciona mejor que uno horizontal.
+
+
+2) FOTOS DE LOS EJERCICIOS
+--------------------------
+Mientras no haya fotos reales, cada ejercicio muestra una miniatura SVG
+generada al vuelo (UI.placeholderImage en js/ui.js).
+
+Para poner fotos reales, edita js/store.js → CATALOGO_EJERCICIOS y llena el
+campo image_url de cada ejercicio:
+
+    { id: 'ex_07', nombre: 'Puente de glúteo', image_url: './assets/ejercicios/puente-gluteo.jpg', ... }
+
+En producción con Supabase, súbelas al bucket público "ejercicios" y guarda
+la URL pública en la columna ejercicios.image_url.
+
+Tamaño sugerido: 640 × 440 px, JPG optimizado (< 80 KB).

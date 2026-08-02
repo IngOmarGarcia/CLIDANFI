@@ -1,0 +1,63 @@
+#===============================================================================
+# CLIDANFI · configuración de Netlify
+#
+# Variables de entorno a definir en:
+#   Netlify → Site configuration → Environment variables
+#     SUPABASE_URL        = https://xxxxxxxx.supabase.co
+#     SUPABASE_ANON_KEY   = eyJhbGciOi...   (la ANON key, nunca la service_role)
+#
+# El build las inyecta en dist/js/env.js. Si faltan, el sitio se publica igual
+# en modo demostración (datos locales) en lugar de romperse.
+#===============================================================================
+
+[build]
+  command  = "npm run build"
+  publish  = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+#--- Cabeceras de seguridad ----------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options            = "DENY"
+    X-Content-Type-Options     = "nosniff"
+    Referrer-Policy            = "strict-origin-when-cross-origin"
+    Permissions-Policy         = "camera=(self), microphone=(), geolocation=()"
+    Strict-Transport-Security  = "max-age=31536000; includeSubDomains"
+    # La app solo habla con Supabase y carga las fuentes de Google.
+    # 'unsafe-inline' en script-src es necesario para los handlers inline del
+    # shell; si los eliminas, endurece esta línea quitándolo.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+#--- Caché ---------------------------------------------------------------------
+# El HTML nunca se cachea (para que un deploy se vea al instante);
+# los estáticos sí, y se invalidan solos porque cambian de contenido.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/js/env.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/css/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+#--- Enrutado ------------------------------------------------------------------
+# El router es por hash (#/t/dashboard), así que no hacen falta rewrites.
+# Este catch-all solo evita un 404 si alguien escribe una ruta suelta.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

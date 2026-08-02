@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Generados por el build
+js/env.js
+js/vendor/
+css/tailwind.css
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+.netlify/
+.env
+.env.*

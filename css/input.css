@@ -1,0 +1,9 @@
+/* ==========================================================================
+   CLIDANFI · entrada de Tailwind
+   Compila con:  npm run css      → css/tailwind.css (minificado)
+                 npm run css:watch (desarrollo)
+   Los estilos propios viven en css/styles.css y se enlazan aparte.
+   ========================================================================== */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
