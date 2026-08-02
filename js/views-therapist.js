@@ -261,7 +261,7 @@
     const html = `
       <div class="anim-fade-up">
         <!-- Buscador -->
-        <div class="sticky top-0 z-10 bg-ink-50/95 px-4 pb-3 pt-4 backdrop-blur">
+        <div class="sticky top-0 z-10 bg-cream-100/95 px-4 pb-3 pt-4 backdrop-blur">
           <div class="relative">
             <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-400">${icon('search', 'h-4.5 w-4.5')}</span>
             <input id="buscador-pacientes" type="search" inputmode="search" autocomplete="off"
@@ -471,7 +471,10 @@
         </button>`;
     }
 
-    const activas = Store.SECCIONES_VALORACION.filter((s) => v.secciones_activas.includes(s.key));
+    // jsonb/text[] pueden llegar nulos si la fila se creó fuera de la app
+    const secciones = v.secciones_activas || [];
+    const todosLosDatos = v.datos || {};
+    const activas = Store.SECCIONES_VALORACION.filter((s) => secciones.includes(s.key));
 
     const renderValor = (campo, val) => {
       if (val === undefined || val === null || val === '' || (Array.isArray(val) && !val.length)) return null;
@@ -502,7 +505,7 @@
       </div>
 
       ${activas.map((sec) => {
-        const datos = v.datos[sec.key] || {};
+        const datos = todosLosDatos[sec.key] || {};
         const filas = sec.campos.map((c) => {
           const txt = renderValor(c, datos[c.key]);
           return txt ? `
@@ -637,8 +640,10 @@
     if (!p) return { titulo: 'Valoración', html: `<div class="p-4">${emptyState('alert', 'Paciente no encontrado')}</div>` };
 
     const v = await API.valoracionDePaciente(p.id);
-    const activas = new Set(v ? v.secciones_activas : ['general', 'dolor', 'diagnostico']);
-    const datos = v ? v.datos : {};
+    const activas = new Set(v && v.secciones_activas && v.secciones_activas.length
+      ? v.secciones_activas
+      : ['general', 'dolor', 'diagnostico']);
+    const datos = (v && v.datos) || {};
 
     /* --- Render de un campo según su tipo --- */
     function campo(sec, c) {
@@ -1115,8 +1120,8 @@
                      class="flex flex-1 items-center justify-center gap-1.5 rounded-xl ${s.publicado ? 'bg-ink-100 text-ink-700' : 'bg-emerald-600 text-white'} py-2.5 text-[12.5px] font-bold active:scale-95">
                      ${icon(s.publicado ? 'x' : 'check', 'h-4 w-4')} ${s.publicado ? 'Ocultar' : 'Publicar'}
                    </button>`
-                : `<button data-action="realizar-sorteo" data-id="${s.id}" ${s.total_boletos ? '' : 'disabled'}
-                     class="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-violet-600 py-2.5 text-[12.5px] font-bold text-white active:scale-95 disabled:opacity-40">
+                : `<button data-action="realizar-sorteo" data-id="${s.id}"
+                     class="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-violet-600 py-2.5 text-[12.5px] font-bold text-white active:scale-95">
                      ${icon('shuffle', 'h-4 w-4')} Sortear
                    </button>`}
             </div>
@@ -1567,6 +1572,32 @@
   /* --- Animación de sorteo -------------------------------------------- */
   async function ejecutarSorteo(sorteoId) {
     const s = await API.obtenerSorteo(sorteoId);
+
+    // Sin boletos no hay entre quién sortear: se explica en vez de fallar.
+    if (!s.total_boletos) {
+      return openSheet({
+        title: 'Todavía no hay boletos',
+        subtitle: s.titulo,
+        body: `
+          <div class="space-y-3">
+            ${emptyState('ticket', 'Nadie participa aún',
+              'Los boletos se emiten solos al registrar asistencias dentro del periodo del sorteo.')}
+            <div class="rounded-xl bg-violet-50 p-3 ring-1 ring-violet-200">
+              <p class="text-[11px] font-extrabold uppercase tracking-wide text-violet-700">Cómo generar boletos</p>
+              <ol class="mt-1.5 space-y-1 text-[12.5px] leading-snug text-violet-900">
+                <li>1 · Abre la ficha de un paciente.</li>
+                <li>2 · Toca <strong>Asistencia</strong> y confirma.</li>
+                <li>3 · Se emite 1 boleto por cada asistencia registrada.</li>
+              </ol>
+              <p class="mt-2 text-[11.5px] font-semibold text-violet-700">
+                Periodo: ${E(fmtDate(s.inicia_en))} – ${E(fmtDate(s.termina_en))}
+              </p>
+            </div>
+          </div>`,
+        footer: `<button data-sheet-close class="w-full rounded-xl bg-ink-100 py-3 text-[13.5px] font-bold text-ink-700">Entendido</button>`
+      });
+    }
+
     const ok = await confirmSheet({
       title: 'Realizar sorteo',
       message: `Se elegirá un ganador al azar entre los ${s.total_boletos} boletos de "${s.titulo}". La acción quedará registrada.`,

@@ -1,18 +1,16 @@
 /* ==========================================================================
-   CLIDANFI · store.js
-   Capa de persistencia local (localStorage) + datos semilla + catálogos
-   clínicos.
+   CLIDANFI · store.js  ·  CATÁLOGOS CLÍNICOS
+   Configuración del dominio, no datos de prueba:
 
-   ► Sirve como "base de datos falsa" con exactamente la misma forma que las
-     tablas de Supabase (ver supabase/schema.sql). Cuando conectes Supabase,
-     este archivo solo se usa para los catálogos (CATALOGO_EJERCICIOS y
-     SECCIONES_VALORACION), que pueden vivir en el cliente o migrarse a tablas.
+     · CATALOGO_EJERCICIOS   catálogo visual del generador de rutinas.
+                             Debe mantenerse sincronizado con la tabla
+                             `ejercicios` de supabase/schema.sql (mismos id).
+     · SECCIONES_VALORACION  motor de la valoración inicial dinámica.
+
+   Aquí no hay persistencia ni datos de ejemplo: los datos viven en Supabase.
    ========================================================================== */
 (function (global) {
   'use strict';
-
-  const KEY = 'clidanfi.db.v4';
-  const { ticketCode, addDays, startOfDay } = UI;
 
   /* ======================================================================
      1. CATÁLOGO DE EJERCICIOS
@@ -254,176 +252,12 @@
   ];
 
   /* ======================================================================
-     3. DATOS SEMILLA MÍNIMA
-     Solo lo indispensable para que la aplicación funcione y se entienda la
-     estructura de datos:
-
-        · 2 cuentas de acceso (1 fisioterapeuta + 1 paciente)
-        · 1 paciente vinculado a su cuenta
-        · 1 cita agendada
-        · 1 rutina de ejercicios activa
-        · 1 sorteo activo
-
-     Se incluyen además 1 asistencia y 1 pago porque son los que dan de alta
-     el boleto del sorteo y alimentan la gráfica de ingresos. Si prefieres
-     arrancar completamente en cero, vacía `asistencias`, `pagos` y `boletos`.
-
-     ⚠ Estos datos son SOLO para el modo demostración (sin Supabase).
-       La semilla de producción está en supabase/seed.sql.
+     EXPORT
      ====================================================================== */
-
-  /** Fecha relativa a hoy, en hora local. */
-  const at = (diasOffset, hora, min = 0) => {
-    const d = addDays(startOfDay(new Date()), diasOffset);
-    d.setHours(hora, min, 0, 0);
-    return d.toISOString();
-  };
-
-  /**
-   * Cuentas del modo demostración. En producción NO se usan: el acceso lo
-   * resuelve Supabase Auth contra la tabla `perfiles`.
-   */
-  const USUARIOS_DEMO = [
-    { id: 'usr_fisio', email: 'fisio@clidanfi.mx', password: 'clidanfi123',
-      rol: 'fisio', nombre: 'Fisio. Daniela Figueroa' },
-    { id: 'usr_paciente', email: 'paciente@clidanfi.mx', password: 'paciente123',
-      rol: 'paciente', nombre: 'Paciente de Prueba' }
-  ];
-
-  function crearSemilla() {
-    /* --- 1 paciente, vinculado a la cuenta de paciente ------------------ */
-    const paciente = {
-      id: 'pac_demo',
-      usuario_id: 'usr_paciente',
-      nombre: 'Paciente de Prueba',
-      telefono: '667 000 0000',
-      email: 'paciente@clidanfi.mx',
-      edad: 34,
-      sexo: 'F',
-      diagnostico: 'Lumbalgia mecánica',
-      alergias: '',
-      avatar_url: '',
-      paquete_nombre: 'Paquete 10 sesiones',
-      paquete_total: 10,
-      paquete_usadas: 1,
-      paquete_vence: at(60, 20),
-      activo: true,
-      creado_en: at(-7, 10)
-    };
-
-    /* --- 1 asistencia (genera el boleto y el ingreso) ------------------- */
-    const asistencia = {
-      id: 'asi_demo', paciente_id: paciente.id, cita_id: null,
-      asistio_en: at(-2, 10), nota: '', creado_en: at(-2, 10)
-    };
-
-    const pago = {
-      id: 'pag_demo', paciente_id: paciente.id, monto: 450,
-      metodo: 'Efectivo', concepto: 'Sesión de fisioterapia', pagado_en: at(-2, 10)
-    };
-
-    /* --- 1 cita agendada ------------------------------------------------ */
-    const cita = {
-      id: 'cit_demo', paciente_id: paciente.id,
-      inicia_en: at(1, 10), duracion_min: 45,
-      motivo: 'Sesión de rehabilitación', estado: 'agendada', notas: ''
-    };
-
-    /* --- 1 rutina activa ------------------------------------------------ */
-    const rutina = {
-      id: 'rut_demo', paciente_id: paciente.id,
-      titulo: 'Fase 1 · control lumbar',
-      notas: 'Realizar 5 días a la semana. Suspender si el dolor supera 5/10.',
-      activa: true, creado_en: at(-2, 11),
-      items: ['ex_07', 'ex_08', 'ex_10', 'ex_21'].map((exId, i) => {
-        const ex = CATALOGO_EJERCICIOS.find((e) => e.id === exId);
-        return {
-          id: 'rit_demo_' + i, ejercicio_id: exId, orden: i,
-          series: ex.sets, reps: ex.reps, hold: ex.hold,
-          frecuencia: '5 × semana', nota: ''
-        };
-      })
-    };
-
-    /* --- 1 sorteo activo + su boleto ------------------------------------ */
-    const sorteo = {
-      id: 'sor_demo',
-      titulo: 'Sorteo del mes',
-      premio: 'Paquete de 3 sesiones de fisioterapia',
-      descripcion: 'Acumula un boleto por cada asistencia registrada. ¡Entre más vengas, más oportunidades!',
-      inicia_en: at(-15, 0), termina_en: at(15, 23, 59),
-      estado: 'activo', publicado: true,
-      ganador_paciente_id: null, ganador_boleto: null, sorteado_en: null,
-      creado_en: at(-15, 9)
-    };
-
-    const boleto = {
-      id: 'bol_demo', sorteo_id: sorteo.id, paciente_id: paciente.id,
-      asistencia_id: asistencia.id, codigo: ticketCode(), creado_en: asistencia.asistio_en
-    };
-
-    return {
-      version: 4,
-      usuarios: USUARIOS_DEMO,
-      pacientes: [paciente],
-      citas: [cita],
-      asistencias: [asistencia],
-      pagos: [pago],
-      valoraciones: [],   // se crea desde la ficha del paciente
-      notas: [],          // se crean desde la pestaña Historial
-      rutinas: [rutina],
-      promociones: [],    // se crean desde el dashboard
-      sorteos: [sorteo],
-      boletos: [boleto],
-      config: {
-        clinica: 'CLIDANFI',
-        lema: 'Fisioterapia y rehabilitación',
-        fisio: 'Fisio. Daniela Figueroa',
-        precio_sesion: 450
-      }
-    };
-  }
-
-  /* ======================================================================
-     4. PERSISTENCIA
-     ====================================================================== */
-  let db = null;
-
-  function load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) { db = JSON.parse(raw); return db; }
-    } catch (e) {
-      console.warn('[CLIDANFI] No se pudo leer localStorage, se usa memoria.', e);
-    }
-    db = crearSemilla();
-    save();
-    return db;
-  }
-
-  function save() {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(db));
-      return true;
-    } catch (e) {
-      console.warn('[CLIDANFI] Error guardando (¿cuota llena?).', e);
-      UI.toast('No se pudo guardar: almacenamiento lleno. Elimina algunas fotos.', 'error', 4000);
-      return false;
-    }
-  }
-
-  function reset() {
-    db = crearSemilla();
-    save();
-    return db;
-  }
-
-  Object.defineProperty(global, 'DB', { get: () => db || load() });
-
   global.Store = {
-    KEY, load, save, reset,
-    get db() { return db || load(); },
-    CATALOGO_EJERCICIOS, CATEGORIAS_EJERCICIO, SECCIONES_VALORACION, USUARIOS_DEMO,
+    CATALOGO_EJERCICIOS,
+    CATEGORIAS_EJERCICIO,
+    SECCIONES_VALORACION,
     ejercicio: (id) => CATALOGO_EJERCICIOS.find((e) => e.id === id) || null
   };
 })(window);

@@ -1,472 +1,435 @@
 /* ==========================================================================
    CLIDANFI · api.js  ·  CAPA DE ACCESO A DATOS
    --------------------------------------------------------------------------
-   TODA la app habla únicamente con `API.*`. Ninguna vista toca localStorage
-   ni Supabase directamente.
+   Toda la aplicación habla únicamente con `API.*`. Ninguna vista consulta
+   Supabase por su cuenta.
 
-   ► Implementación actual: mock sobre localStorage (Store).
-   ► Para pasar a producción: incluye `js/api-supabase.js` DESPUÉS de este
-     archivo en index.html. Ese archivo sobrescribe `window.API` con la
-     versión real de Supabase, misma firma, mismos nombres. Cero cambios en
-     las vistas.
+   El cliente se crea una sola vez en js/supabase-client.js y llega aquí como
+   `window.SB`. No hay modo demostración ni almacenamiento local: si falta
+   configuración, este módulo no se activa y app.js muestra la pantalla de
+   configuración.
    ========================================================================== */
 (function (global) {
   'use strict';
 
-  const { uid, ticketCode, startOfDay, startOfWeek, addDays, isoDay, normalize } = UI;
-  const S = () => Store.db;
-  const persist = () => Store.save();
+  const sb = global.SB;
+  if (!sb) {
+    console.warn('[CLIDANFI] API sin cliente de Supabase: revisa js/env.js.');
+    return;
+  }
 
-  /** Simula latencia de red para que la UI ya contemple estados async. */
-  const tick = (v) => new Promise((r) => setTimeout(() => r(v), 0));
-  const clone = (v) => JSON.parse(JSON.stringify(v));
-  const byDateDesc = (k) => (a, b) => new Date(b[k]) - new Date(a[k]);
-  const byDateAsc  = (k) => (a, b) => new Date(a[k]) - new Date(b[k]);
+  const { startOfWeek, addDays, isoDay, normalize, uid } = UI;
+
+  /** Lanza si la consulta falló; si no, devuelve los datos. */
+  const ok = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
 
   /* ======================================================================
-     CONFIGURACIÓN
+     AUTENTICACIÓN
      ====================================================================== */
-  const getConfig = async () => tick(clone(S().config));
+  /**
+   * Normaliza la sesión de Supabase al mismo contrato que usa la app:
+   *   { user: { id, email }, perfil: { id, rol, nombre } }
+   * El ROL viene de la tabla `perfiles`, nunca del cliente: es la misma
+   * fuente que consultan las políticas RLS mediante es_fisio().
+   */
+  const _normalizar = async (session) => {
+    if (!session || !session.user) return null;
+    const { data, error } = await sb.from('perfiles').select('id, rol, nombre').eq('id', session.user.id).single();
+    if (error) {
+      console.error('[CLIDANFI] El usuario no tiene perfil en la tabla `perfiles`:', error.message);
+      return null;
+    }
+    return {
+      user: { id: session.user.id, email: session.user.email },
+      perfil: { id: data.id, rol: data.rol, nombre: data.nombre || session.user.email }
+    };
+  };
+
+  /* --- Sesión en memoria ------------------------------------------------
+     El guardia de autorización necesita el rol de forma síncrona, así que la
+     sesión y el expediente propio se cachean aquí y se refrescan en cada
+     cambio de sesión. */
+  let _sesion = null;
+  let _miPacienteId = null;
+
+  const _recordarSesion = async (s) => {
+    _sesion = s;
+    _miPacienteId = null;
+    if (s && s.perfil.rol === 'paciente') {
+      const { data } = await sb.from('pacientes').select('id').eq('usuario_id', s.user.id).limit(1);
+      _miPacienteId = data && data.length ? data[0].id : null;
+    }
+    return s;
+  };
+
+  const auth = {
+    entrar: async (email, password) => {
+      const { data, error } = await sb.auth.signInWithPassword({
+        email: String(email || '').trim().toLowerCase(),
+        password
+      });
+      // Mensaje uniforme: no revelamos si el correo existe.
+      if (error) throw new Error(/invalid login/i.test(error.message)
+        ? 'Correo o contraseña incorrectos.'
+        : error.message);
+
+      const s = await _normalizar(data.session);
+      if (!s) {
+        await sb.auth.signOut();
+        throw new Error('Tu cuenta no tiene un perfil asignado. Contacta a la clínica.');
+      }
+      return _recordarSesion(s);
+    },
+
+    registrar: async (email, password, nombre) => {
+      const { data, error } = await sb.auth.signUp({
+        email: String(email || '').trim().toLowerCase(), password,
+        options: { data: { nombre } }
+      });
+      if (error) throw new Error(error.message);
+      return data;
+    },
+
+    recuperar: async (email) => {
+      const { error } = await sb.auth.resetPasswordForEmail(String(email || '').trim().toLowerCase(), {
+        redirectTo: location.origin + location.pathname
+      });
+      if (error) throw new Error(error.message);
+      return true;
+    },
+
+    cambiarPassword: async (password) => {
+      const { error } = await sb.auth.updateUser({ password });
+      if (error) throw new Error(error.message);
+      return true;
+    },
+
+    salir: async () => { await sb.auth.signOut(); await _recordarSesion(null); },
+
+    sesion: async () => {
+      const { data } = await sb.auth.getSession();
+      return _recordarSesion(await _normalizar(data.session));
+    },
+
+    onCambio: (cb) => {
+      const { data } = sb.auth.onAuthStateChange(async (_evento, session) =>
+        cb(await _recordarSesion(await _normalizar(session))));
+      return () => data.subscription.unsubscribe();
+    }
+  };
+
+  /**
+   * Expediente ligado a la sesión. La consulta filtra por usuario_id, pero la
+   * garantía real es la política RLS `pac_ve_su_ficha`: aunque alguien
+   * manipulara este filtro, el servidor no devolvería filas ajenas.
+   */
+  const miPaciente = async () => {
+    const u = (await sb.auth.getUser()).data.user;
+    if (!u) return null;
+    const rows = ok(await sb.from('pacientes_ordenados').select('*').eq('usuario_id', u.id).limit(1));
+    if (!rows.length) return null;
+    return { ...rows[0], proxima_cita: await _proximaCitaDe(rows[0].id) };
+  };
+
+  /* ======================================================================
+     CONFIGURACIÓN  (se guarda local: son preferencias de UI)
+     ====================================================================== */
+  const CFG_KEY = 'clidanfi.config';
+  const CFG_DEF = { clinica: 'CLIDANFI', lema: 'Fisioterapia y rehabilitación', fisio: '', precio_sesion: 450 };
+
+  const getConfig = async () => {
+    const cfg = { ...CFG_DEF };
+    try { Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch { /* preferencias corruptas */ }
+    if (!cfg.fisio) {
+      const s = await auth.sesion();
+      cfg.fisio = s ? s.perfil.nombre : '';
+    }
+    return cfg;
+  };
 
   const setConfig = async (patch) => {
-    Object.assign(S().config, patch);
-    persist();
-    return tick(clone(S().config));
+    const cfg = { ...(await getConfig()), ...patch };
+    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+    return cfg;
   };
 
   /* ======================================================================
      PACIENTES
      ====================================================================== */
+  const _proximaCitaDe = async (pacienteId) => {
+    const rows = ok(await sb.from('citas').select('*')
+      .eq('paciente_id', pacienteId).eq('estado', 'agendada')
+      .gte('inicia_en', new Date().toISOString())
+      .order('inicia_en', { ascending: true }).limit(1));
+    return rows[0] || null;
+  };
 
-  /** Fecha ISO de la última asistencia registrada, o null. */
-  function _ultimaAsistencia(pacienteId) {
-    const list = S().asistencias.filter((a) => a.paciente_id === pacienteId);
-    if (!list.length) return null;
-    return list.reduce((max, a) => (new Date(a.asistio_en) > new Date(max) ? a.asistio_en : max), list[0].asistio_en);
-  }
-
-  /** Enriquece al paciente con datos derivados que la UI necesita. */
-  function _decorarPaciente(p) {
-    const ultima = _ultimaAsistencia(p.id);
-    const totalVisitas = S().asistencias.filter((a) => a.paciente_id === p.id).length;
-    const proxima = S().citas
-      .filter((c) => c.paciente_id === p.id && c.estado === 'agendada' && new Date(c.inicia_en) >= new Date())
-      .sort(byDateAsc('inicia_en'))[0] || null;
-    return {
-      ...clone(p),
-      ultima_asistencia: ultima,
-      total_visitas: totalVisitas,
-      proxima_cita: proxima ? clone(proxima) : null,
-      paquete_restantes: Math.max(0, (p.paquete_total || 0) - (p.paquete_usadas || 0))
-    };
-  }
-
-  /**
-   * Lista de pacientes ORDENADA POR FECHA DE ÚLTIMA ASISTENCIA (desc).
-   * Los que nunca han asistido quedan al final.
-   * @param {{q?: string}} opts  q = búsqueda por nombre/teléfono/diagnóstico
-   */
+  /** Usa la vista `pacientes_ordenados`, que ya viene ordenada por última asistencia. */
   const listarPacientes = async ({ q = '' } = {}) => {
-    const term = normalize(q).trim();
-    let list = S().pacientes.map(_decorarPaciente);
-
-    if (term) {
-      list = list.filter((p) =>
-        normalize(p.nombre).includes(term) ||
-        normalize(p.diagnostico).includes(term) ||
-        String(p.telefono || '').replace(/\s/g, '').includes(term.replace(/\s/g, '')));
-    }
-
-    list.sort((a, b) => {
-      if (!a.ultima_asistencia && !b.ultima_asistencia) return a.nombre.localeCompare(b.nombre);
-      if (!a.ultima_asistencia) return 1;   // sin asistencias → al final
-      if (!b.ultima_asistencia) return -1;
-      return new Date(b.ultima_asistencia) - new Date(a.ultima_asistencia);
-    });
-
-    return tick(list);
+    let query = sb.from('pacientes_ordenados').select('*');
+    if (q.trim()) query = query.or(`nombre.ilike.%${q}%,diagnostico.ilike.%${q}%,telefono.ilike.%${q}%`);
+    const rows = ok(await query);
+    return rows.map((p) => ({ ...p, proxima_cita: null }));
   };
 
   const obtenerPaciente = async (id) => {
-    const p = S().pacientes.find((x) => x.id === id);
-    return tick(p ? _decorarPaciente(p) : null);
+    const rows = ok(await sb.from('pacientes_ordenados').select('*').eq('id', id).limit(1));
+    if (!rows.length) return null;
+    return { ...rows[0], proxima_cita: await _proximaCitaDe(id) };
   };
 
-  const crearPaciente = async (data) => {
-    const p = {
-      id: uid('pac'), nombre: '', telefono: '', email: '', edad: null, sexo: '',
-      diagnostico: '', avatar_url: '', alergias: '',
-      paquete_nombre: 'Sesión individual', paquete_total: 1, paquete_usadas: 0, paquete_vence: null,
-      activo: true, creado_en: new Date().toISOString(),
-      ...data
-    };
-    S().pacientes.push(p);
-    persist();
-    return tick(_decorarPaciente(p));
-  };
+  const crearPaciente = async (data) =>
+    ok(await sb.from('pacientes').insert(data).select().single());
 
-  const actualizarPaciente = async (id, patch) => {
-    const p = S().pacientes.find((x) => x.id === id);
-    if (!p) throw new Error('Paciente no encontrado');
-    Object.assign(p, patch);
-    persist();
-    return tick(_decorarPaciente(p));
-  };
+  const actualizarPaciente = async (id, patch) =>
+    ok(await sb.from('pacientes').update(patch).eq('id', id).select().single());
 
   const eliminarPaciente = async (id) => {
-    const d = S();
-    d.pacientes = d.pacientes.filter((p) => p.id !== id);
-    ['citas', 'asistencias', 'pagos', 'valoraciones', 'notas', 'rutinas', 'boletos']
-      .forEach((t) => { d[t] = d[t].filter((r) => r.paciente_id !== id); });
-    persist();
-    return tick(true);
+    ok(await sb.from('pacientes').delete().eq('id', id));  // cascada por FK
+    return true;
   };
 
   /* ======================================================================
-     CITAS / AGENDA
+     CITAS
      ====================================================================== */
-  const _decorarCita = (c) => {
-    const p = S().pacientes.find((x) => x.id === c.paciente_id);
-    return { ...clone(c), paciente_nombre: p ? p.nombre : 'Paciente eliminado', paciente: p ? clone(p) : null };
-  };
+  const _conNombre = (rows) =>
+    rows.map((c) => ({ ...c, paciente_nombre: c.pacientes ? c.pacientes.nombre : '—', paciente: c.pacientes || null }));
+
+  const SELECT_CITA = '*, pacientes(id, nombre, telefono, diagnostico)';
 
   const citasDeHoy = async () => {
     const hoy = isoDay(new Date());
-    return tick(S().citas
-      .filter((c) => isoDay(c.inicia_en) === hoy)
-      .sort(byDateAsc('inicia_en'))
-      .map(_decorarCita));
+    return _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
+      .gte('inicia_en', `${hoy}T00:00:00`)
+      .lte('inicia_en', `${hoy}T23:59:59`)
+      .order('inicia_en', { ascending: true })));
   };
 
-  /** Próximas citas agendadas (desde ahora), agrupables por día. */
-  const proximasCitas = async ({ dias = 14, limite = 50 } = {}) => {
-    const ahora = new Date();
-    const hasta = addDays(startOfDay(ahora), dias + 1);
-    return tick(S().citas
-      .filter((c) => c.estado === 'agendada' && new Date(c.inicia_en) >= ahora && new Date(c.inicia_en) < hasta)
-      .sort(byDateAsc('inicia_en'))
-      .slice(0, limite)
-      .map(_decorarCita));
-  };
+  const proximasCitas = async ({ dias = 14, limite = 50 } = {}) =>
+    _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
+      .eq('estado', 'agendada')
+      .gte('inicia_en', new Date().toISOString())
+      .lte('inicia_en', addDays(new Date(), dias).toISOString())
+      .order('inicia_en', { ascending: true }).limit(limite)));
 
   const citasDePaciente = async (pacienteId) =>
-    tick(S().citas.filter((c) => c.paciente_id === pacienteId).sort(byDateDesc('inicia_en')).map(_decorarCita));
+    _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
+      .eq('paciente_id', pacienteId).order('inicia_en', { ascending: false })));
 
   const proximaCitaDePaciente = async (pacienteId) => {
-    const ahora = new Date();
-    const c = S().citas
-      .filter((x) => x.paciente_id === pacienteId && x.estado === 'agendada' && new Date(x.inicia_en) >= ahora)
-      .sort(byDateAsc('inicia_en'))[0];
-    return tick(c ? _decorarCita(c) : null);
+    const c = await _proximaCitaDe(pacienteId);
+    if (!c) return null;
+    const p = ok(await sb.from('pacientes').select('nombre').eq('id', pacienteId).single());
+    return { ...c, paciente_nombre: p.nombre };
   };
 
-  const crearCita = async (data) => {
-    const c = {
-      id: uid('cit'), paciente_id: null, inicia_en: new Date().toISOString(),
-      duracion_min: 45, motivo: 'Sesión de rehabilitación', estado: 'agendada', notas: '',
-      ...data
-    };
-    S().citas.push(c);
-    persist();
-    return tick(_decorarCita(c));
-  };
-
-  const actualizarCita = async (id, patch) => {
-    const c = S().citas.find((x) => x.id === id);
-    if (!c) throw new Error('Cita no encontrada');
-    Object.assign(c, patch);
-    persist();
-    return tick(_decorarCita(c));
-  };
-
-  const eliminarCita = async (id) => {
-    S().citas = S().citas.filter((c) => c.id !== id);
-    persist();
-    return tick(true);
-  };
+  const crearCita = async (data) => ok(await sb.from('citas').insert(data).select().single());
+  const actualizarCita = async (id, patch) => ok(await sb.from('citas').update(patch).eq('id', id).select().single());
+  const eliminarCita = async (id) => { ok(await sb.from('citas').delete().eq('id', id)); return true; };
 
   /* ======================================================================
-     ASISTENCIAS  ·  el corazón del sistema
-     Registrar una asistencia dispara, en cascada:
-       1. actualiza el orden de la lista de pacientes (última asistencia)
-       2. descuenta una sesión del paquete
-       3. registra el ingreso (si hay monto)
-       4. emite 1 BOLETO por cada sorteo activo vigente
+     ASISTENCIAS
+     El trigger `trg_boletos_asistencia` de la BD emite los boletos y
+     descuenta el paquete automáticamente. Aquí solo insertamos.
      ====================================================================== */
   const registrarAsistencia = async ({ paciente_id, cita_id = null, fecha = null, monto = null, metodo = 'Efectivo', concepto = 'Sesión de fisioterapia', nota = '' }) => {
-    const d = S();
-    const p = d.pacientes.find((x) => x.id === paciente_id);
-    if (!p) throw new Error('Paciente no encontrado');
+    const asistio_en = fecha ? new Date(fecha).toISOString() : new Date().toISOString();
 
-    const iso = fecha ? new Date(fecha).toISOString() : new Date().toISOString();
+    const asistencia = ok(await sb.from('asistencias')
+      .insert({ paciente_id, cita_id, asistio_en, nota }).select().single());
 
-    const asistencia = { id: uid('asi'), paciente_id, cita_id, asistio_en: iso, nota, creado_en: new Date().toISOString() };
-    d.asistencias.push(asistencia);
-
-    // 2 · paquete
-    if ((p.paquete_total || 0) > 0) p.paquete_usadas = Math.min(p.paquete_total, (p.paquete_usadas || 0) + 1);
-
-    // 3 · ingreso
     if (monto !== null && Number(monto) > 0) {
-      d.pagos.push({ id: uid('pag'), paciente_id, monto: Number(monto), metodo, concepto, pagado_en: iso });
+      ok(await sb.from('pagos').insert({ paciente_id, monto: Number(monto), metodo, concepto, pagado_en: asistio_en }));
     }
+    if (cita_id) ok(await sb.from('citas').update({ estado: 'completada' }).eq('id', cita_id));
 
-    // 4 · boletos automáticos
-    const nuevos = _emitirBoletosPara(asistencia);
-
-    // marca la cita como completada
-    if (cita_id) {
-      const c = d.citas.find((x) => x.id === cita_id);
-      if (c) c.estado = 'completada';
-    }
-
-    persist();
-    return tick({ asistencia: clone(asistencia), boletos: nuevos });
+    // Boletos que generó el trigger
+    const boletos = ok(await sb.from('boletos').select('*').eq('asistencia_id', asistencia.id));
+    return { asistencia, boletos };
   };
-
-  /** Emite un boleto por cada sorteo activo cuyo periodo cubra la asistencia. */
-  function _emitirBoletosPara(asistencia) {
-    const d = S();
-    const t = new Date(asistencia.asistio_en);
-    const nuevos = [];
-    d.sorteos.forEach((s) => {
-      if (s.estado !== 'activo') return;
-      if (t < new Date(s.inicia_en) || t > new Date(s.termina_en)) return;
-      const yaExiste = d.boletos.some((b) => b.sorteo_id === s.id && b.asistencia_id === asistencia.id);
-      if (yaExiste) return;
-      const b = {
-        id: uid('bol'), sorteo_id: s.id, paciente_id: asistencia.paciente_id,
-        asistencia_id: asistencia.id, codigo: ticketCode(), creado_en: asistencia.asistio_en
-      };
-      d.boletos.push(b);
-      nuevos.push(clone(b));
-    });
-    return nuevos;
-  }
 
   const asistenciasDePaciente = async (pacienteId) =>
-    tick(S().asistencias.filter((a) => a.paciente_id === pacienteId).sort(byDateDesc('asistio_en')).map(clone));
+    ok(await sb.from('asistencias').select('*').eq('paciente_id', pacienteId).order('asistio_en', { ascending: false }));
 
-  const eliminarAsistencia = async (id) => {
-    const d = S();
-    d.asistencias = d.asistencias.filter((a) => a.id !== id);
-    d.boletos = d.boletos.filter((b) => b.asistencia_id !== id);
-    persist();
-    return tick(true);
-  };
+  const eliminarAsistencia = async (id) => { ok(await sb.from('asistencias').delete().eq('id', id)); return true; };
 
   /* ======================================================================
      INGRESOS
      ====================================================================== */
-  const registrarPago = async ({ paciente_id, monto, metodo = 'Efectivo', concepto = 'Sesión de fisioterapia', fecha = null }) => {
-    const pago = {
-      id: uid('pag'), paciente_id, monto: Number(monto) || 0, metodo, concepto,
+  const registrarPago = async ({ paciente_id, monto, metodo = 'Efectivo', concepto = 'Sesión de fisioterapia', fecha = null }) =>
+    ok(await sb.from('pagos').insert({
+      paciente_id, monto: Number(monto) || 0, metodo, concepto,
       pagado_en: fecha ? new Date(fecha).toISOString() : new Date().toISOString()
-    };
-    S().pagos.push(pago);
-    persist();
-    return tick(clone(pago));
-  };
+    }).select().single());
 
-  /**
-   * Resumen de ingresos de la semana (lunes → domingo).
-   * @returns {{total, porDia:[{fecha,label,total}], semanaAnterior, variacion}}
-   */
   const ingresosSemana = async (ref = new Date()) => {
     const ini = startOfWeek(ref);
-    const fin = addDays(ini, 7);
+    const fin = addDays(ini, 6);
     const iniPrev = addDays(ini, -7);
 
-    const enRango = (p, a, b) => { const t = new Date(p.pagado_en); return t >= a && t < b; };
-    const pagos = S().pagos;
+    const [actual, previa] = await Promise.all([
+      sb.rpc('ingresos_por_dia', { p_desde: isoDay(ini), p_hasta: isoDay(fin) }).then(ok),
+      sb.rpc('ingresos_por_dia', { p_desde: isoDay(iniPrev), p_hasta: isoDay(addDays(iniPrev, 6)) }).then(ok)
+    ]);
 
-    const total = pagos.filter((p) => enRango(p, ini, fin)).reduce((s, p) => s + p.monto, 0);
-    const semanaAnterior = pagos.filter((p) => enRango(p, iniPrev, ini)).reduce((s, p) => s + p.monto, 0);
+    const total = actual.reduce((s, d) => s + Number(d.total), 0);
+    const semanaAnterior = previa.reduce((s, d) => s + Number(d.total), 0);
+    const hoy = isoDay(new Date());
 
-    const porDia = Array.from({ length: 7 }, (_, i) => {
-      const d = addDays(ini, i);
-      const key = isoDay(d);
-      return {
-        fecha: key,
-        label: UI.DIAS_S[d.getDay()],
-        esHoy: key === isoDay(new Date()),
-        total: pagos.filter((p) => isoDay(p.pagado_en) === key).reduce((s, p) => s + p.monto, 0)
-      };
+    const porDia = actual.map((d) => {
+      const fecha = new Date(d.dia + 'T12:00:00');
+      return { fecha: d.dia, label: UI.DIAS_S[fecha.getDay()], esHoy: d.dia === hoy, total: Number(d.total) };
     });
 
-    const variacion = semanaAnterior > 0 ? Math.round(((total - semanaAnterior) / semanaAnterior) * 100) : null;
-    return tick({ total, porDia, semanaAnterior, variacion, inicio: ini.toISOString(), fin: addDays(ini, 6).toISOString() });
+    return {
+      total, porDia, semanaAnterior,
+      variacion: semanaAnterior > 0 ? Math.round(((total - semanaAnterior) / semanaAnterior) * 100) : null,
+      inicio: ini.toISOString(), fin: fin.toISOString()
+    };
   };
 
   const pagosDePaciente = async (pacienteId) =>
-    tick(S().pagos.filter((p) => p.paciente_id === pacienteId).sort(byDateDesc('pagado_en')).map(clone));
+    ok(await sb.from('pagos').select('*').eq('paciente_id', pacienteId).order('pagado_en', { ascending: false }));
 
   /* ======================================================================
-     VALORACIÓN INICIAL
+     VALORACIONES
      ====================================================================== */
   const valoracionDePaciente = async (pacienteId) => {
-    const v = S().valoraciones.filter((x) => x.paciente_id === pacienteId).sort(byDateDesc('creado_en'))[0];
-    return tick(v ? clone(v) : null);
+    const rows = ok(await sb.from('valoraciones').select('*')
+      .eq('paciente_id', pacienteId).order('creado_en', { ascending: false }).limit(1));
+    return rows[0] || null;
   };
 
   const guardarValoracion = async (pacienteId, { secciones_activas, datos, id = null }) => {
-    const d = S();
-    let v = id ? d.valoraciones.find((x) => x.id === id) : null;
-    if (v) {
-      v.secciones_activas = secciones_activas;
-      v.datos = datos;
-      v.actualizado_en = new Date().toISOString();
-    } else {
-      v = {
-        id: uid('val'), paciente_id: pacienteId, secciones_activas, datos,
-        creado_en: new Date().toISOString(), actualizado_en: new Date().toISOString()
-      };
-      d.valoraciones.push(v);
+    if (id) {
+      return ok(await sb.from('valoraciones')
+        .update({ secciones_activas, datos, actualizado_en: new Date().toISOString() })
+        .eq('id', id).select().single());
     }
-    persist();
-    return tick(clone(v));
+    return ok(await sb.from('valoraciones')
+      .insert({ paciente_id: pacienteId, secciones_activas, datos }).select().single());
   };
 
   /* ======================================================================
-     NOTAS DE EVOLUCIÓN + ADJUNTOS (fotos de pruebas)
+     NOTAS + ADJUNTOS (Supabase Storage)
      ====================================================================== */
+
+  /** Sube un dataURL al bucket `evidencias` y devuelve una URL firmada. */
+  const _subirEvidencia = async (dataUrl, pacienteId) => {
+    const blob = await (await fetch(dataUrl)).blob();
+    const ruta = `${pacienteId}/${uid('img')}.jpg`;
+    ok(await sb.storage.from('evidencias').upload(ruta, blob, { contentType: 'image/jpeg', upsert: false }));
+    const { data } = await sb.storage.from('evidencias').createSignedUrl(ruta, 60 * 60 * 24 * 365);
+    return { ruta, url: data.signedUrl };
+  };
+
   const notasDePaciente = async (pacienteId) =>
-    tick(S().notas.filter((n) => n.paciente_id === pacienteId).sort(byDateDesc('creado_en')).map(clone));
+    ok(await sb.from('notas').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }));
 
   const crearNota = async ({ paciente_id, texto, eva = null, tipo = 'evolucion', adjuntos = [] }) => {
-    const n = {
-      id: uid('not'), paciente_id, tipo, texto, eva,
-      adjuntos: adjuntos.map((a) => ({ id: uid('adj'), url: a.url, titulo: a.titulo || 'Evidencia', creado_en: new Date().toISOString() })),
-      creado_en: new Date().toISOString()
-    };
-    S().notas.push(n);
-    persist();
-    return tick(clone(n));
+    const subidos = [];
+    for (const a of adjuntos) {
+      const r = a.url.startsWith('data:') ? await _subirEvidencia(a.url, paciente_id) : { url: a.url, ruta: null };
+      subidos.push({ id: uid('adj'), url: r.url, ruta: r.ruta, titulo: a.titulo || 'Evidencia', creado_en: new Date().toISOString() });
+    }
+    return ok(await sb.from('notas').insert({ paciente_id, tipo, texto, eva, adjuntos: subidos }).select().single());
   };
 
   const agregarAdjunto = async (notaId, { url, titulo = 'Evidencia' }) => {
-    const n = S().notas.find((x) => x.id === notaId);
-    if (!n) throw new Error('Nota no encontrada');
-    n.adjuntos = n.adjuntos || [];
-    n.adjuntos.push({ id: uid('adj'), url, titulo, creado_en: new Date().toISOString() });
-    persist();
-    return tick(clone(n));
+    const nota = ok(await sb.from('notas').select('*').eq('id', notaId).single());
+    const r = url.startsWith('data:') ? await _subirEvidencia(url, nota.paciente_id) : { url, ruta: null };
+    const adjuntos = [...(nota.adjuntos || []), { id: uid('adj'), url: r.url, ruta: r.ruta, titulo, creado_en: new Date().toISOString() }];
+    return ok(await sb.from('notas').update({ adjuntos }).eq('id', notaId).select().single());
   };
 
-  const eliminarNota = async (id) => {
-    S().notas = S().notas.filter((n) => n.id !== id);
-    persist();
-    return tick(true);
-  };
+  const eliminarNota = async (id) => { ok(await sb.from('notas').delete().eq('id', id)); return true; };
 
   /* ======================================================================
-     RUTINAS DE EJERCICIO
-     La más reciente queda ACTIVA y aparece arriba; el resto queda como
-     histórico consultable por fecha.
+     RUTINAS
      ====================================================================== */
-  const _decorarRutina = (r) => ({
-    ...clone(r),
-    items: (r.items || []).slice().sort((a, b) => a.orden - b.orden).map((it) => ({
-      ...clone(it),
-      ejercicio: Store.ejercicio(it.ejercicio_id) || { nombre: 'Ejercicio eliminado', categoria: 'Movilidad', image_url: '', descripcion: '' }
+  const SELECT_RUTINA = '*, rutina_items(*, ejercicios(*))';
+
+  const _mapRutina = (r) => ({
+    ...r,
+    items: (r.rutina_items || []).sort((a, b) => a.orden - b.orden).map((it) => ({
+      ...it,
+      ejercicio: it.ejercicios || Store.ejercicio(it.ejercicio_id) || { nombre: '—', categoria: 'Movilidad', image_url: '', descripcion: '' }
     }))
   });
 
   const rutinasDePaciente = async (pacienteId) =>
-    tick(S().rutinas.filter((r) => r.paciente_id === pacienteId).sort(byDateDesc('creado_en')).map(_decorarRutina));
+    ok(await sb.from('rutinas').select(SELECT_RUTINA)
+      .eq('paciente_id', pacienteId).order('creado_en', { ascending: false })).map(_mapRutina);
 
   const rutinaActiva = async (pacienteId) => {
-    const list = S().rutinas.filter((r) => r.paciente_id === pacienteId).sort(byDateDesc('creado_en'));
-    const r = list.find((x) => x.activa) || list[0];
-    return tick(r ? _decorarRutina(r) : null);
+    const rows = ok(await sb.from('rutinas').select(SELECT_RUTINA)
+      .eq('paciente_id', pacienteId).eq('activa', true).order('creado_en', { ascending: false }).limit(1));
+    return rows.length ? _mapRutina(rows[0]) : null;
   };
 
   const guardarRutina = async (pacienteId, { titulo, notas = '', items = [], id = null }) => {
-    const d = S();
-    const normItems = items.map((it, i) => ({
-      id: it.id || uid('rit'), ejercicio_id: it.ejercicio_id, orden: i,
-      series: Number(it.series) || 0, reps: Number(it.reps) || 0, hold: Number(it.hold) || 0,
-      frecuencia: it.frecuencia || 'Diario', nota: it.nota || ''
-    }));
-
-    let r = id ? d.rutinas.find((x) => x.id === id) : null;
-    if (r) {
-      Object.assign(r, { titulo, notas, items: normItems, actualizado_en: new Date().toISOString() });
+    let rutinaId = id;
+    if (rutinaId) {
+      ok(await sb.from('rutinas').update({ titulo, notas, activa: true }).eq('id', rutinaId));
+      ok(await sb.from('rutina_items').delete().eq('rutina_id', rutinaId));
     } else {
-      r = {
-        id: uid('rut'), paciente_id: pacienteId, titulo, notas, items: normItems,
-        activa: true, creado_en: new Date().toISOString()
-      };
-      d.rutinas.push(r);
+      const r = ok(await sb.from('rutinas').insert({ paciente_id: pacienteId, titulo, notas, activa: true }).select().single());
+      rutinaId = r.id;
     }
-    // Solo una rutina activa por paciente
-    d.rutinas.filter((x) => x.paciente_id === pacienteId).forEach((x) => { x.activa = x.id === r.id; });
-    persist();
-    return tick(_decorarRutina(r));
+
+    if (items.length) {
+      ok(await sb.from('rutina_items').insert(items.map((it, i) => ({
+        rutina_id: rutinaId, ejercicio_id: it.ejercicio_id, orden: i,
+        series: Number(it.series) || 0, reps: Number(it.reps) || 0, hold: Number(it.hold) || 0,
+        frecuencia: it.frecuencia || 'Diario', nota: it.nota || ''
+      }))));
+    }
+    // El trigger `trg_una_rutina_activa` desactiva las demás
+    const r = ok(await sb.from('rutinas').select(SELECT_RUTINA).eq('id', rutinaId).single());
+    return _mapRutina(r);
   };
 
   const activarRutina = async (rutinaId) => {
-    const d = S();
-    const r = d.rutinas.find((x) => x.id === rutinaId);
-    if (!r) throw new Error('Rutina no encontrada');
-    d.rutinas.filter((x) => x.paciente_id === r.paciente_id).forEach((x) => { x.activa = x.id === rutinaId; });
-    persist();
-    return tick(_decorarRutina(r));
+    ok(await sb.from('rutinas').update({ activa: true }).eq('id', rutinaId));
+    return _mapRutina(ok(await sb.from('rutinas').select(SELECT_RUTINA).eq('id', rutinaId).single()));
   };
 
-  const eliminarRutina = async (rutinaId) => {
-    S().rutinas = S().rutinas.filter((r) => r.id !== rutinaId);
-    persist();
-    return tick(true);
-  };
+  const eliminarRutina = async (rutinaId) => { ok(await sb.from('rutinas').delete().eq('id', rutinaId)); return true; };
 
   /* ======================================================================
      PROMOCIONES
      ====================================================================== */
-  const _vigente = (p) => {
-    const now = new Date();
-    return p.activa && new Date(p.desde) <= now && new Date(p.hasta) >= now;
-  };
+  const _vigente = (p) => { const n = new Date(); return p.activa && new Date(p.desde) <= n && new Date(p.hasta) >= n; };
 
   const listarPromociones = async ({ soloVigentes = false } = {}) => {
-    let list = S().promociones.map((p) => ({ ...clone(p), vigente: _vigente(p) }));
+    let list = ok(await sb.from('promociones').select('*').order('desde', { ascending: false }))
+      .map((p) => ({ ...p, vigente: _vigente(p) }));
     if (soloVigentes) list = list.filter((p) => p.vigente);
-    return tick(list.sort((a, b) => Number(b.vigente) - Number(a.vigente) || new Date(b.desde) - new Date(a.desde)));
+    return list.sort((a, b) => Number(b.vigente) - Number(a.vigente));
   };
 
-  const guardarPromocion = async (data) => {
-    const d = S();
-    if (data.id) {
-      const p = d.promociones.find((x) => x.id === data.id);
-      if (p) Object.assign(p, data);
-      persist();
-      return tick(clone(p));
-    }
-    const p = { id: uid('pro'), color: 'brand', image_url: '', activa: true, ...data };
-    d.promociones.push(p);
-    persist();
-    return tick(clone(p));
-  };
+  const guardarPromocion = async (data) => data.id
+    ? ok(await sb.from('promociones').update(data).eq('id', data.id).select().single())
+    : ok(await sb.from('promociones').insert(data).select().single());
 
-  const eliminarPromocion = async (id) => {
-    S().promociones = S().promociones.filter((p) => p.id !== id);
-    persist();
-    return tick(true);
-  };
+  const eliminarPromocion = async (id) => { ok(await sb.from('promociones').delete().eq('id', id)); return true; };
 
   /* ======================================================================
-     SORTEOS / RIFAS
+     SORTEOS
      ====================================================================== */
-  const _decorarSorteo = (s) => {
-    const d = S();
-    const boletos = d.boletos.filter((b) => b.sorteo_id === s.id);
-    const participantes = new Set(boletos.map((b) => b.paciente_id));
-    const ganador = s.ganador_paciente_id ? d.pacientes.find((p) => p.id === s.ganador_paciente_id) : null;
+  const _decorarSorteo = async (s) => {
+    const [{ count: totalBoletos }, boletos] = await Promise.all([
+      sb.from('boletos').select('*', { count: 'exact', head: true }).eq('sorteo_id', s.id),
+      sb.from('boletos').select('paciente_id').eq('sorteo_id', s.id).then(ok)
+    ]);
+    const ganador = s.ganador_paciente_id
+      ? ok(await sb.from('pacientes').select('nombre').eq('id', s.ganador_paciente_id).single())
+      : null;
     const now = new Date();
     return {
-      ...clone(s),
-      total_boletos: boletos.length,
-      total_participantes: participantes.size,
+      ...s,
+      total_boletos: totalBoletos || 0,
+      total_participantes: new Set(boletos.map((b) => b.paciente_id)).size,
       ganador_nombre: ganador ? ganador.nombre : null,
       vigente: s.estado === 'activo' && new Date(s.inicia_en) <= now && new Date(s.termina_en) >= now,
       cerrado: new Date(s.termina_en) < now,
@@ -475,232 +438,121 @@
   };
 
   const listarSorteos = async ({ soloPublicados = false } = {}) => {
-    let list = S().sorteos.map(_decorarSorteo);
-    if (soloPublicados) list = list.filter((s) => s.publicado);
-    // activos primero, luego por fecha de término desc
-    return tick(list.sort((a, b) =>
-      Number(b.estado === 'activo') - Number(a.estado === 'activo') ||
-      new Date(b.termina_en) - new Date(a.termina_en)));
+    let q = sb.from('sorteos').select('*').order('termina_en', { ascending: false });
+    if (soloPublicados) q = q.eq('publicado', true);
+    const rows = ok(await q);
+    const list = await Promise.all(rows.map(_decorarSorteo));
+    return list.sort((a, b) => Number(b.estado === 'activo') - Number(a.estado === 'activo'));
   };
 
   const obtenerSorteo = async (id) => {
-    const s = S().sorteos.find((x) => x.id === id);
-    return tick(s ? _decorarSorteo(s) : null);
+    const s = ok(await sb.from('sorteos').select('*').eq('id', id).single());
+    return _decorarSorteo(s);
   };
 
   const guardarSorteo = async (data) => {
-    const d = S();
-    if (data.id) {
-      const s = d.sorteos.find((x) => x.id === data.id);
-      if (!s) throw new Error('Sorteo no encontrado');
-      Object.assign(s, data);
-      persist();
-      await sincronizarBoletos(s.id);
-      return tick(_decorarSorteo(s));
-    }
-    const s = {
-      id: uid('sor'), titulo: '', premio: '', descripcion: '',
-      inicia_en: new Date().toISOString(), termina_en: addDays(new Date(), 30).toISOString(),
-      estado: 'activo', publicado: true,
-      ganador_paciente_id: null, ganador_boleto: null, sorteado_en: null,
-      creado_en: new Date().toISOString(), ...data
-    };
-    d.sorteos.push(s);
-    persist();
+    const s = data.id
+      ? ok(await sb.from('sorteos').update(data).eq('id', data.id).select().single())
+      : ok(await sb.from('sorteos').insert(data).select().single());
     await sincronizarBoletos(s.id);
-    return tick(_decorarSorteo(s));
+    return _decorarSorteo(ok(await sb.from('sorteos').select('*').eq('id', s.id).single()));
   };
 
-  const eliminarSorteo = async (id) => {
-    const d = S();
-    d.sorteos = d.sorteos.filter((s) => s.id !== id);
-    d.boletos = d.boletos.filter((b) => b.sorteo_id !== id);
-    persist();
-    return tick(true);
-  };
+  const eliminarSorteo = async (id) => { ok(await sb.from('sorteos').delete().eq('id', id)); return true; };
 
-  /**
-   * Recorre las asistencias dentro del periodo del sorteo y emite los boletos
-   * que falten (1 boleto = 1 asistencia). Idempotente.
-   */
   const sincronizarBoletos = async (sorteoId) => {
-    const d = S();
-    const s = d.sorteos.find((x) => x.id === sorteoId);
-    if (!s) throw new Error('Sorteo no encontrado');
-    const d0 = new Date(s.inicia_en), d1 = new Date(s.termina_en);
-    let creados = 0;
-
-    d.asistencias.forEach((a) => {
-      const t = new Date(a.asistio_en);
-      if (t < d0 || t > d1) return;
-      if (d.boletos.some((b) => b.sorteo_id === s.id && b.asistencia_id === a.id)) return;
-      d.boletos.push({
-        id: uid('bol'), sorteo_id: s.id, paciente_id: a.paciente_id,
-        asistencia_id: a.id, codigo: ticketCode(), creado_en: a.asistio_en
-      });
-      creados++;
-    });
-
-    // Limpia boletos de asistencias que quedaron fuera del nuevo periodo
-    const validos = new Set(d.asistencias
-      .filter((a) => { const t = new Date(a.asistio_en); return t >= d0 && t <= d1; })
-      .map((a) => a.id));
-    const antes = d.boletos.length;
-    d.boletos = d.boletos.filter((b) => b.sorteo_id !== s.id || validos.has(b.asistencia_id));
-
-    persist();
-    return tick({ creados, eliminados: antes - d.boletos.length });
+    const r = ok(await sb.rpc('sincronizar_boletos', { p_sorteo: sorteoId }));
+    return { creados: r?.[0]?.creados ?? 0, eliminados: r?.[0]?.eliminados ?? 0 };
   };
 
-  /** Boletos de un sorteo, agrupados por paciente y ordenados por cantidad. */
   const participantesDeSorteo = async (sorteoId) => {
-    const d = S();
+    const rows = ok(await sb.from('boletos').select('codigo, paciente_id, pacientes(nombre)').eq('sorteo_id', sorteoId));
     const map = new Map();
-    d.boletos.filter((b) => b.sorteo_id === sorteoId).forEach((b) => {
-      if (!map.has(b.paciente_id)) map.set(b.paciente_id, { paciente_id: b.paciente_id, boletos: [] });
+    rows.forEach((b) => {
+      if (!map.has(b.paciente_id)) map.set(b.paciente_id, { paciente_id: b.paciente_id, nombre: b.pacientes?.nombre || '—', boletos: [] });
       map.get(b.paciente_id).boletos.push(b.codigo);
     });
-    const list = [...map.values()].map((r) => {
-      const p = d.pacientes.find((x) => x.id === r.paciente_id);
-      return { ...r, nombre: p ? p.nombre : 'Paciente eliminado', total: r.boletos.length };
-    });
-    return tick(list.sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre)));
+    return [...map.values()].map((r) => ({ ...r, total: r.boletos.length }))
+      .sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre));
   };
 
-  /** Elige un boleto al azar (probabilidad proporcional a asistencias). */
   const realizarSorteo = async (sorteoId) => {
-    const d = S();
-    const s = d.sorteos.find((x) => x.id === sorteoId);
-    if (!s) throw new Error('Sorteo no encontrado');
-    const boletos = d.boletos.filter((b) => b.sorteo_id === sorteoId);
-    if (!boletos.length) throw new Error('No hay boletos emitidos para este sorteo');
-
-    const g = boletos[Math.floor(Math.random() * boletos.length)];
-    const p = d.pacientes.find((x) => x.id === g.paciente_id);
-
-    s.ganador_paciente_id = g.paciente_id;
-    s.ganador_boleto = g.codigo;
-    s.sorteado_en = new Date().toISOString();
-    s.estado = 'sorteado';
-    s.publicado = false; // el fisio decide cuándo publicarlo
-    persist();
-
-    return tick({
-      sorteo: _decorarSorteo(s),
-      ganador: { paciente_id: g.paciente_id, nombre: p ? p.nombre : '—', codigo: g.codigo, total_boletos: boletos.length }
-    });
+    const r = ok(await sb.rpc('realizar_sorteo', { p_sorteo: sorteoId }));
+    const g = r[0];
+    return {
+      sorteo: await obtenerSorteo(sorteoId),
+      ganador: { paciente_id: g.paciente_id, nombre: g.nombre, codigo: g.codigo, total_boletos: Number(g.total_boletos) }
+    };
   };
 
   const publicarGanador = async (sorteoId, publicado = true) => {
-    const s = S().sorteos.find((x) => x.id === sorteoId);
-    if (!s) throw new Error('Sorteo no encontrado');
-    s.publicado = publicado;
-    persist();
-    return tick(_decorarSorteo(s));
+    ok(await sb.from('sorteos').update({ publicado }).eq('id', sorteoId));
+    return obtenerSorteo(sorteoId);
   };
 
-  /** Boletos del paciente agrupados por sorteo (vista paciente). */
   const misBoletos = async (pacienteId) => {
-    const d = S();
-    return tick(d.sorteos.filter((s) => s.publicado).map((s) => {
-      const mios = d.boletos.filter((b) => b.sorteo_id === s.id && b.paciente_id === pacienteId);
+    const sorteos = ok(await sb.from('sorteos').select('*').eq('publicado', true).order('termina_en', { ascending: false }));
+    const list = await Promise.all(sorteos.map(async (s) => {
+      const d = await _decorarSorteo(s);
+      const mios = ok(await sb.from('boletos').select('codigo').eq('sorteo_id', s.id).eq('paciente_id', pacienteId));
       return {
-        ...(_decorarSorteo(s)),
+        ...d,
         mis_boletos: mios.map((b) => b.codigo),
         mis_boletos_total: mios.length,
         soy_ganador: s.ganador_paciente_id === pacienteId
       };
-    }).sort((a, b) =>
-      Number(b.estado === 'activo') - Number(a.estado === 'activo') ||
-      new Date(b.termina_en) - new Date(a.termina_en)));
+    }));
+    return list.sort((a, b) => Number(b.estado === 'activo') - Number(a.estado === 'activo'));
   };
 
   /* ======================================================================
      DASHBOARD
      ====================================================================== */
   const resumenDashboard = async () => {
-    const d = S();
     const hoy = isoDay(new Date());
-    const ingresos = await ingresosSemana();
-    const citasHoy = await citasDeHoy();
-    const semanaIni = startOfWeek(new Date());
+    const semanaIni = startOfWeek(new Date()).toISOString();
 
-    return tick({
+    const [ingresos, citasHoy, atendidosHoy, atendidosSemana, pacientesActivos, sorteosActivos, promos, pagosSemana] =
+      await Promise.all([
+        ingresosSemana(),
+        citasDeHoy(),
+        sb.from('asistencias').select('*', { count: 'exact', head: true })
+          .gte('asistio_en', `${hoy}T00:00:00`).lte('asistio_en', `${hoy}T23:59:59`),
+        sb.from('asistencias').select('*', { count: 'exact', head: true }).gte('asistio_en', semanaIni),
+        sb.from('pacientes').select('*', { count: 'exact', head: true }).eq('activo', true),
+        sb.from('sorteos').select('*', { count: 'exact', head: true }).eq('estado', 'activo'),
+        listarPromociones({ soloVigentes: true }),
+        sb.from('pagos').select('monto').gte('pagado_en', semanaIni).then(ok)
+      ]);
+
+    return {
       ingresos,
       citas_hoy: citasHoy,
       citas_hoy_total: citasHoy.length,
       citas_hoy_pendientes: citasHoy.filter((c) => c.estado === 'agendada').length,
-      atendidos_hoy: d.asistencias.filter((a) => isoDay(a.asistio_en) === hoy).length,
-      atendidos_semana: d.asistencias.filter((a) => new Date(a.asistio_en) >= semanaIni).length,
-      pacientes_activos: d.pacientes.filter((p) => p.activo).length,
-      sorteos_activos: d.sorteos.filter((s) => s.estado === 'activo').length,
-      promos_vigentes: d.promociones.filter(_vigente).length,
-      ticket_promedio: (() => {
-        const pagos = d.pagos.filter((p) => new Date(p.pagado_en) >= semanaIni);
-        return pagos.length ? Math.round(pagos.reduce((s, p) => s + p.monto, 0) / pagos.length) : 0;
-      })()
-    });
+      atendidos_hoy: atendidosHoy.count || 0,
+      atendidos_semana: atendidosSemana.count || 0,
+      pacientes_activos: pacientesActivos.count || 0,
+      sorteos_activos: sorteosActivos.count || 0,
+      promos_vigentes: promos.length,
+      ticket_promedio: pagosSemana.length
+        ? Math.round(pagosSemana.reduce((s, p) => s + Number(p.monto), 0) / pagosSemana.length) : 0
+    };
   };
 
   /* ======================================================================
-     AUTENTICACIÓN (modo demostración)
-     Espejo local de Supabase Auth: misma firma, sesión en localStorage.
-     En producción esta implementación se sustituye por la de
-     js/api-supabase.js, que valida contra el servidor.
+     EXPORT · sobrescribe window.API manteniendo la misma firma
      ====================================================================== */
-  const SESION_KEY = 'clidanfi.sesion';
-  let _sesion = null;
-  const _oyentes = [];
-
-  const _emitir = () => _oyentes.forEach((cb) => { try { cb(_sesion); } catch (e) { console.error(e); } });
-
-  const _cargarSesion = () => {
-    if (_sesion) return _sesion;
-    try { _sesion = JSON.parse(localStorage.getItem(SESION_KEY) || 'null'); } catch { _sesion = null; }
-    return _sesion;
-  };
-
-  const auth = {
-    entrar: async (email, password) => {
-      const correo = String(email || '').trim().toLowerCase();
-      const u = S().usuarios.find((x) => x.email.toLowerCase() === correo);
-      // Mensaje genérico a propósito: no revelamos si el correo existe.
-      if (!u || u.password !== password) throw new Error('Correo o contraseña incorrectos.');
-      _sesion = { user: { id: u.id, email: u.email }, perfil: { id: u.id, rol: u.rol, nombre: u.nombre } };
-      localStorage.setItem(SESION_KEY, JSON.stringify(_sesion));
-      _emitir();
-      return _sesion;
-    },
-    salir: async () => {
-      _sesion = null;
-      localStorage.removeItem(SESION_KEY);
-      _emitir();
-    },
-    sesion: async () => _cargarSesion(),
-    registrar: async () => { throw new Error('El alta de cuentas requiere Supabase. Crea el usuario desde el panel de Supabase.'); },
-    cambiarPassword: async () => { throw new Error('El cambio de contraseña requiere Supabase.'); },
-    onCambio: (cb) => { _oyentes.push(cb); return () => _oyentes.splice(_oyentes.indexOf(cb), 1); }
-  };
-
-  /** Paciente vinculado a la sesión actual (null si el usuario es fisio). */
-  const miPaciente = async () => {
-    const s = _cargarSesion();
-    if (!s) return null;
-    const p = S().pacientes.find((x) => x.usuario_id === s.user.id);
-    return p ? _decorarPaciente(p) : null;
-  };
-
   /* ======================================================================
-     CONTROL DE ACCESO
-     Esta matriz es el ESPEJO EN CLIENTE de las políticas RLS de
-     supabase/schema.sql. Existe para que el modo demostración se comporte
-     igual que producción y para dar errores claros.
+     CONTROL DE ACCESO EN CLIENTE
+     Espejo de las políticas RLS de supabase/schema.sql. Sirve para cortar
+     antes de salir a la red y para dar mensajes claros.
 
-     ⚠ En producción la autoridad es RLS, en el servidor. Un guardia en el
-       navegador nunca es una medida de seguridad por sí solo.
+     ⚠ NO es la medida de seguridad: la autoridad es RLS, en el servidor.
+       Aunque alguien saltara este guardia editando el JavaScript, PostgreSQL
+       seguiría negando las filas ajenas.
      ====================================================================== */
 
-  // Exclusivas del fisioterapeuta
   const SOLO_FISIO = [
     'listarPacientes', 'crearPaciente', 'actualizarPaciente', 'eliminarPaciente',
     'citasDeHoy', 'proximasCitas', 'crearCita', 'actualizarCita', 'eliminarCita',
@@ -724,32 +576,30 @@
 
   // Abiertas a cualquier sesión: getConfig, setConfig, listarPromociones, miPaciente
 
-  const _rol = () => (_cargarSesion() || {}).perfil?.rol || null;
+  async function _autorizar(nombre, args) {
+    if (!_sesion) await auth.sesion();          // primera llamada tras recargar
+    if (!_sesion) throw new Error('Sesión no iniciada.');
 
-  const _miPacienteId = () => {
-    const s = _cargarSesion();
-    if (!s) return null;
-    const p = S().pacientes.find((x) => x.usuario_id === s.user.id);
-    return p ? p.id : null;
-  };
+    const rol = _sesion.perfil.rol;
+    if (rol === 'fisio') return;
+
+    if (SOLO_FISIO.includes(nombre)) {
+      throw new Error('Acceso denegado: esta información es exclusiva del fisioterapeuta.');
+    }
+    if (nombre in SOLO_PROPIO) {
+      const pedido = args[SOLO_PROPIO[nombre]];
+      if (!pedido || pedido !== _miPacienteId) {
+        throw new Error('Acceso denegado: no puedes consultar el expediente de otro paciente.');
+      }
+    }
+  }
 
   function _proteger(api) {
     const salida = {};
     for (const [nombre, fn] of Object.entries(api)) {
       if (typeof fn !== 'function') { salida[nombre] = fn; continue; }
-
       salida[nombre] = async (...args) => {
-        if (!_cargarSesion()) throw new Error('Sesión no iniciada.');
-
-        if (SOLO_FISIO.includes(nombre) && _rol() !== 'fisio') {
-          throw new Error('Acceso denegado: esta información es exclusiva del fisioterapeuta.');
-        }
-        if (nombre in SOLO_PROPIO && _rol() !== 'fisio') {
-          const pedido = args[SOLO_PROPIO[nombre]];
-          if (!pedido || pedido !== _miPacienteId()) {
-            throw new Error('Acceso denegado: no puedes consultar el expediente de otro paciente.');
-          }
-        }
+        await _autorizar(nombre, args);
         return fn(...args);
       };
     }
@@ -760,30 +610,25 @@
      EXPORT
      ====================================================================== */
   global.API = Object.assign(_proteger({
-    // configuración de la app
     getConfig, setConfig,
-    // pacientes
     listarPacientes, obtenerPaciente, crearPaciente, actualizarPaciente, eliminarPaciente,
-    // agenda
     citasDeHoy, proximasCitas, citasDePaciente, proximaCitaDePaciente, crearCita, actualizarCita, eliminarCita,
-    // asistencias e ingresos
     registrarAsistencia, asistenciasDePaciente, eliminarAsistencia,
     registrarPago, ingresosSemana, pagosDePaciente,
-    // clínico
     valoracionDePaciente, guardarValoracion,
     notasDePaciente, crearNota, agregarAdjunto, eliminarNota,
-    // rutinas
     rutinasDePaciente, rutinaActiva, guardarRutina, activarRutina, eliminarRutina,
-    // marketing
     listarPromociones, guardarPromocion, eliminarPromocion,
     listarSorteos, obtenerSorteo, guardarSorteo, eliminarSorteo,
     sincronizarBoletos, participantesDeSorteo, realizarSorteo, publicarGanador, misBoletos,
-    // dashboard
     resumenDashboard
   }), {
-    // Fuera del guardia: `auth` debe funcionar SIN sesión previa.
-    _impl: 'localStorage',
+    // Fuera del guardia: deben funcionar SIN sesión previa.
+    _impl: 'supabase',
+    sb,
     auth,
     miPaciente
   });
+
+  console.info('[CLIDANFI] API conectada a Supabase.');
 })(window);

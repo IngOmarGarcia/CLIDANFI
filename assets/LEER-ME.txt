@@ -3,24 +3,59 @@ CLIDANFI · Carpeta de recursos
 
 1) LOGO DE LA CLÍNICA
 ---------------------
-Coloca aquí el archivo del logo con este nombre exacto:
+Copia aquí tu archivo con este nombre EXACTO:
 
-    logo-clidanfi.svg     (recomendado: vectorial, se ve nítido en cualquier pantalla)
+    logo-clidanfi.jpeg
 
-o bien:
+Con eso basta: aparece automáticamente en los cuatro sitios donde está
+cableado, sin tocar una línea de código.
 
-    logo-clidanfi.png     (mínimo 132 × 132 px para pantallas retina)
+    · Cabecera de la aplicación   44 × 44 px
+    · Pantalla de acceso          80 × 80 px
+    · Marca de agua del fondo     grande y tenue, solo en pantallas de PC
+    · Favicon de la pestaña
 
-Si usas PNG, cambia la extensión en el <img> de index.html:
+Tamaño recomendado: mínimo 512 × 512 px, para que se vea nítido en pantallas
+retina y dé margen a la marca de agua del escritorio. Un formato cuadrado o
+circular funciona mejor que uno horizontal.
 
-    <img id="brand-logo" src="./assets/logo-clidanfi.png" ... >
+EL LOGO ACTUAL
+--------------
+Archivo   : logo-clidanfi.jpeg
+Tamaño    : 1254 x 1254 px (cuadrado) — resolución de sobra
+Colores   : rojo #921f23 · crema #ded6ca · fondo #212022
+
+La paleta de toda la aplicación está muestreada de este archivo
+(tailwind.config.js -> colors), así que interfaz y logotipo van a juego.
+
+NOTA SOBRE EL FORMATO JPEG
+--------------------------
+El JPEG no admite transparencia, así que el logo lleva su fondo oscuro sólido:
+
+  · En la cabecera y en la pantalla de acceso se ve como un mosaico oscuro
+    redondeado sobre el crema. Queda como un icono de aplicación.
+
+  · En la marca de agua del escritorio NO se nota el recuadro, porque el fondo
+    del logo (#212022) es exactamente el color --night-800 del degradado de la
+    página. Por eso .app-watermark no aclara la imagen: hacerlo delataría el
+    borde del rectángulo.
+
+Si algún día quieres que el logo se recorte contra el fondo crema en vez de
+mostrar su mosaico, exporta un PNG con transparencia y cambia la extensión en
+los dos archivos que lo referencian:
+
+    index.html            (favicon, marca de agua y cabecera)
+    js/views-auth.js      (pantalla de acceso)
+
+SI CAMBIAS EL LOGO
+------------------
+Vuelve a muestrear los colores y actualiza tailwind.config.js, o la interfaz
+dejará de coincidir con la marca.
 
 Mientras el archivo no exista, el <img> muestra automáticamente un recuadro
-punteado con la palabra "LOGO" (definido en css/styles.css → .logo-fallback).
-No se inventó ningún logo: la etiqueta está lista y vacía, esperando el tuyo.
-
-El logo se muestra a 44 × 44 px en la cabecera. Un formato cuadrado o
-circular con márgenes internos funciona mejor que uno horizontal.
+punteado con la palabra "LOGO" (definido en css/styles.css → .logo-fallback)
+y la marca de agua del fondo simplemente no se dibuja.
+No se inventó ningún logo: las etiquetas están listas y vacías, esperando el tuyo.
 
 
 2) FOTOS DE LOS EJERCICIOS

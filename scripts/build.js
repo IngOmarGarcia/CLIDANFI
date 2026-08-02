@@ -69,14 +69,26 @@ if (!fs.existsSync(path.join(DIST, 'css', 'tailwind.css'))) problemas.push('falt
 if (!fs.existsSync(path.join(DIST, 'js', 'env.js'))) problemas.push('falta dist/js/env.js');
 if (fs.existsSync(path.join(DIST, 'css', 'input.css'))) problemas.push('input.css no debería publicarse');
 
-// Ningún archivo publicado puede contener una service_role key
+/* Ningún archivo publicado puede llevar una llave con privilegios.
+   Se buscan JWT reales y se decodifica su payload: mencionar la cadena
+   "service_role" en un comentario o en un aviso de la interfaz es legítimo,
+   llevar la llave incrustada no lo es. */
+const JWT = /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
+
 const buscarSecretos = (dir) => {
   for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, f.name);
     if (f.isDirectory()) { buscarSecretos(p); continue; }
     if (!/\.(js|html|json|css)$/.test(f.name)) continue;
-    if (/service_role/.test(fs.readFileSync(p, 'utf8'))) {
-      problemas.push(`⛔ posible service_role key en ${path.relative(DIST, p)}`);
+
+    for (const token of fs.readFileSync(p, 'utf8').match(JWT) || []) {
+      let rol = null;
+      try {
+        rol = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8')).role;
+      } catch { continue; }
+      if (rol && rol !== 'anon') {
+        problemas.push(`⛔ llave con role="${rol}" incrustada en ${path.relative(DIST, p)}`);
+      }
     }
   }
 };

@@ -120,9 +120,9 @@
             <div class="mt-4 flex items-center gap-4">
               <div class="relative grid h-20 w-20 shrink-0 place-items-center">
                 <svg viewBox="0 0 36 36" class="absolute inset-0 h-20 w-20 -rotate-90">
-                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" stroke-width="4"></circle>
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e4e2dd" stroke-width="4"></circle>
                   <!-- El arco representa las sesiones que le quedan al paciente -->
-                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#0d9488" stroke-width="4" stroke-linecap="round"
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#ad2830" stroke-width="4" stroke-linecap="round"
                           stroke-dasharray="${(97.39 * (100 - pct) / 100).toFixed(2)} 97.39"></circle>
                 </svg>
                 <div class="text-center">

@@ -1,71 +1,71 @@
 # CLIDANFI · Sistema de gestión para clínica de fisioterapia
 
 Aplicación web **mobile-first** con acceso por cuenta y dos roles (Fisioterapeuta / Paciente).
-HTML + Tailwind CSS compilado + JavaScript vanilla, con Supabase como backend y despliegue en Netlify.
+HTML + Tailwind CSS compilado + JavaScript vanilla, con **Supabase como único backend** y
+despliegue en Netlify.
+
+> **No hay modo demostración.** La aplicación siempre habla con Supabase. Si falta
+> configuración, muestra una pantalla que dice exactamente qué falta y cómo resolverlo,
+> en vez de arrancar con datos falsos que luego no coinciden con la base real.
 
 ---
 
-## Puesta en marcha en 5 pasos
+## Puesta en marcha
 
 ```bash
-npm install          # instala Tailwind y el cliente de Supabase
-npm run build        # genera dist/
-npm run serve        # abre http://localhost:8080
+npm install                          # Tailwind + cliente de Supabase
+copy js\env.example.js js\env.js     # (macOS/Linux: cp js/env.example.js js/env.js)
 ```
 
-Sin credenciales de Supabase, la app arranca en **modo demostración** (datos en el navegador)
-con estas cuentas de prueba:
+Abre `js/env.js` y pega tus credenciales de **Supabase → Project Settings → API**:
 
-| Rol | Correo | Contraseña |
-|---|---|---|
-| Fisioterapeuta | `fisio@clidanfi.mx` | `clidanfi123` |
-| Paciente | `paciente@clidanfi.mx` | `paciente123` |
+```js
+window.CLIDANFI_ENV = {
+  SUPABASE_URL: 'https://xxxxxxxx.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJhbGciOi...'          // la anon public key
+};
+```
 
-Para **desarrollo con recarga de CSS**: `npm run dev` y abre `index.html` con cualquier servidor estático.
+Después:
+
+```bash
+npm run build     # genera dist/
+npm run serve     # http://localhost:8080
+```
 
 ---
 
-## 1 · Conectar Supabase
-
-### 1.1 Base de datos
+## 1 · Base de datos
 
 En **SQL Editor → New query → Run**, ejecuta en este orden:
 
 1. `supabase/schema.sql` — tablas, triggers, funciones, RLS y catálogo de ejercicios.
-2. `supabase/seed.sql` — datos mínimos (leer las instrucciones de su cabecera antes).
+2. `supabase/seed.sql` — datos mínimos (lee las instrucciones de su cabecera antes).
 
-Ambos son idempotentes: puedes volver a ejecutarlos sin romper nada.
+Ambos son idempotentes.
 
-### 1.2 Cuentas
+### Cuentas
 
 En **Authentication → Users → Add user** (marca *Auto Confirm User*):
 
-- `fisio@clidanfi.mx` → será el fisioterapeuta
-- `paciente@clidanfi.mx` → será el paciente de prueba
+- una para el fisioterapeuta
+- una para el paciente de prueba
 
-Copia el UUID de cada uno y pégalos en las variables `v_fisio_uid` y `v_pac_uid`
-de `supabase/seed.sql` antes de ejecutarlo. El script se detiene con un mensaje
-claro si se te olvida.
+Copia el UUID de cada uno en `v_fisio_uid` y `v_pac_uid` dentro de `supabase/seed.sql`
+antes de ejecutarlo. El script se detiene con un mensaje claro si se te olvida.
 
-> El trigger `handle_new_user` crea todo usuario nuevo como `paciente`.
-> Promover a `fisio` es siempre un acto manual — así nadie se auto-asciende registrándose.
-
-### 1.3 Credenciales
-
-```bash
-cp js/env.example.js js/env.js     # Windows: copy js\env.example.js js\env.js
-```
-
-y rellena `SUPABASE_URL` y `SUPABASE_ANON_KEY` (**Project Settings → API**).
+> El trigger `handle_new_user` crea todo usuario nuevo como `paciente`. Promover a `fisio`
+> es siempre un acto manual, así que nadie se auto-asciende registrándose. **Si al entrar
+> ves el portal del paciente en vez del panel, es que falta ese paso**: revisa la fila
+> correspondiente en la tabla `perfiles`.
 
 ---
 
 ## 2 · Desplegar en Netlify
 
-1. Sube el repositorio a GitHub y en Netlify elige **Add new site → Import an existing project**.
-2. Netlify lee `netlify.toml`, así que build y publish ya están configurados
-   (`npm run build` → `dist`). No toques esos campos.
-3. En **Site configuration → Environment variables** añade:
+1. Sube el repositorio a GitHub → en Netlify, **Add new site → Import an existing project**.
+2. Netlify lee `netlify.toml`: build y publish ya están configurados (`npm run build` → `dist`).
+3. En **Site configuration → Environment variables**:
 
    | Variable | Valor |
    |---|---|
@@ -73,37 +73,37 @@ y rellena `SUPABASE_URL` y `SUPABASE_ANON_KEY` (**Project Settings → API**).
    | `SUPABASE_ANON_KEY` | `eyJhbGciOi...` (la **anon** key) |
 
 4. **Deploy**. El build genera `dist/js/env.js` con esos valores.
-5. En Supabase → **Authentication → URL Configuration**, añade tu dominio de Netlify
-   a *Site URL* y *Redirect URLs*.
-
-Si las variables faltan, el sitio se publica igual en modo demostración en vez de romperse.
+5. En Supabase → **Authentication → URL Configuration**, añade tu dominio de Netlify a
+   *Site URL* y *Redirect URLs*.
 
 ### Sobre la seguridad de la `anon key`
 
 **La `anon key` es pública por diseño.** Viaja al navegador en cualquier aplicación web de
 Supabase y no es un secreto: lo que protege los datos son las políticas RLS del servidor.
+Usar variables de entorno sirve para no dejar credenciales en el repositorio y para cambiar
+de proyecto sin tocar código.
 
-Usar variables de entorno sirve para no dejar credenciales escritas en el repositorio y para
-cambiar entre proyectos (staging/producción) sin tocar código.
+Hay dos barreras contra el error caro:
 
-`scripts/generate-env.js` **aborta el build** si detecta que la llave configurada tiene
-`role != "anon"` — la `service_role` key ignora RLS y en el frontend daría acceso total a la
-base de datos a cualquiera que abra las herramientas de desarrollo.
+- `js/supabase-client.js` **no arranca la app** si la llave configurada tiene `role != "anon"`.
+- `scripts/build.js` **aborta el despliegue** si encuentra cualquier JWT privilegiado
+  incrustado en los archivos publicados. Decodifica el token, así que mencionar la palabra
+  `service_role` en un comentario es legítimo; llevar la llave, no.
 
 ---
 
 ## 3 · Seguridad: cómo se separa cada rol
 
-El acceso se resuelve en **tres capas**, de fuera hacia adentro:
+Tres capas, de fuera hacia adentro:
 
-**1. Router (`js/app.js`)** — sin sesión solo existe la pantalla de acceso. Cada ruta declara
-qué rol la puede abrir; escribir a mano `#/t/pacientes` con sesión de paciente redirige a su
-propio inicio.
+**1. Router (`js/app.js`)** — tres puertas en orden: sin configuración válida → pantalla de
+configuración; sin sesión → pantalla de acceso; con sesión, cada ruta declara qué rol la
+puede abrir. Escribir a mano `#/t/pacientes` con sesión de paciente redirige a su inicio.
 
 **2. Capa de datos (`js/api.js`)** — una matriz de autorización envuelve cada función:
-`SOLO_FISIO` (dashboard, ingresos, lista de pacientes, sorteos…) y `SOLO_PROPIO` (el paciente
-solo pasa si el `paciente_id` que pide coincide con el de su sesión). Es el espejo en cliente
-de las políticas RLS y sirve para dar errores claros.
+`SOLO_FISIO` (dashboard, ingresos, lista de pacientes, sorteos…) y `SOLO_PROPIO` (el
+paciente solo pasa si el `paciente_id` que pide coincide con el de su sesión). Corta antes
+de salir a la red y da mensajes claros.
 
 **3. RLS en PostgreSQL (`supabase/schema.sql`)** — la única capa que cuenta de verdad:
 
@@ -117,24 +117,15 @@ de las políticas RLS y sirve para dar errores claros.
 | `sorteos`, `promociones`, `ejercicios` | todo | lee solo lo publicado/activo |
 | `perfiles` | todos | solo el suyo, sin poder cambiar su rol |
 
-Detalles que importan:
-
 - **Ningún rol `paciente` tiene políticas de INSERT/UPDATE/DELETE.** Solo lee. Manipular el
   JavaScript del navegador no cambia eso: el rechazo ocurre en el servidor.
-- El helper `es_mi_expediente(uuid)` ancla cada política a `pacientes.usuario_id`, así que no
-  hay forma de pedir el expediente de otro cambiando un id en la petición.
-- La vista `pacientes_ordenados` se declara con `security_invoker = true`: hereda la RLS de
-  quien la consulta en lugar de saltársela.
-- Un trigger (`bloquear_cambio_de_rol`) impide que alguien se ascienda a `fisio` editando su
-  propio perfil.
-- `realizar_sorteo()` e `ingresos_por_dia()` comprueban `es_fisio()` internamente, aunque se
-  invoquen directamente por RPC.
+- `es_mi_expediente(uuid)` ancla cada política a `pacientes.usuario_id`.
+- La vista `pacientes_ordenados` usa `security_invoker = true`: hereda la RLS de quien consulta.
+- Un trigger impide ascenderse a `fisio` editando el propio perfil.
 
 ---
 
 ## 4 · Datos mínimos incluidos
-
-Exactamente lo indispensable para entender la estructura:
 
 | Qué | Cuánto |
 |---|---|
@@ -145,37 +136,85 @@ Exactamente lo indispensable para entender la estructura:
 | Sorteo | 1, activo |
 | Asistencia + pago | 1 de cada una |
 
-La asistencia existe porque es la que **genera el boleto del sorteo** y el primer ingreso del
-dashboard — sin ella, ambos módulos se ven vacíos y no se entiende el mecanismo. Para arrancar
-totalmente en cero, borra los bloques marcados en `supabase/seed.sql` (paso 5) y vacía
-`asistencias`, `pagos` y `boletos` en `js/store.js`.
+La asistencia genera el boleto del sorteo y el primer ingreso del dashboard. Para arrancar
+totalmente en cero, borra el paso 5 de `supabase/seed.sql`.
 
-El **catálogo de 22 ejercicios** y las **13 secciones de la valoración inicial** no son datos de
-prueba: son la configuración clínica del sistema y se conservan íntegros.
+El **catálogo de 22 ejercicios** y las **13 secciones de la valoración inicial** no son datos
+de prueba: son configuración clínica y viven en `js/store.js` (y la tabla `ejercicios`).
 
 ---
 
-## 5 · Estructura
+## 5 · Diseño
+
+### Paleta
+
+Muestreada directamente del logotipo (`assets/logo-clidanfi.jpeg`), así que interfaz y marca
+van a juego:
+
+| Escala | Uso | Referencia |
+|---|---|---|
+| `brand` | Rojo clínico · acciones, acentos, cabeceras | `brand-700` `#921f23` (el del logo) |
+| `cream` | Beige · fondo de la aplicación | `cream-100` `#f8f4ed` |
+| `ink` | Neutros cálidos · texto, bordes, tarjetas | `ink-900` `#1c1b1a` |
+| `night` | Fondo oscuro del marco de escritorio | `night-800` `#212022` (el del logo) |
+
+> Si cambias el logotipo, vuelve a muestrear estos tres colores y actualiza
+> `tailwind.config.js`, o la interfaz dejará de coincidir con la marca.
+
+Se cambian en un solo sitio: `tailwind.config.js`. Los pocos valores que Tailwind no puede
+alcanzar (anillo de progreso SVG, miniaturas generadas) están en `css/styles.css` como
+variables CSS y en `js/ui.js`.
+
+### Escritorio
+
+En pantallas ≥ 900 px la vista móvil se convierte en un dispositivo centrado sobre fondo
+oscuro con degradado, textura fina y una versión tenue del logotipo. **La vista de celular
+no cambia**: todo el tratamiento de escritorio vive dentro de una media query.
+
+Detalle de implementación que conviene conocer antes de tocarlo: `.app-frame` lleva
+`transform: translateZ(0)` **a propósito**. Eso lo convierte en el bloque contenedor de sus
+descendientes `position: fixed`, de modo que la navegación inferior, el botón flotante, los
+paneles deslizantes y los avisos quedan dentro del marco en lugar de pegarse a los bordes de
+la ventana. Por el mismo motivo `#sheet-root` y `#toast-root` van dentro del marco.
+
+El recorte (`overflow: hidden`) se aplica **solo** en escritorio: en móvil convertiría el
+marco en contenedor de scroll y la cabecera *sticky* dejaría de funcionar.
+
+### Logo
+
+Copia tu archivo en **`assets/logo-clidanfi.jpeg`** y aparece solo en los cuatro sitios donde
+está cableado: cabecera, pantalla de acceso, marca de agua del fondo de escritorio y favicon.
+Mientras no exista, se muestra un recuadro punteado con la palabra «LOGO» y la marca de agua
+simplemente no se dibuja. Ver `assets/LEER-ME.txt`.
+
+El JPEG no admite transparencia, así que el logo conserva su fondo oscuro: en la cabecera y
+en el acceso se ve como un mosaico redondeado, a modo de icono de aplicación. En la marca de
+agua no se nota el recuadro porque ese fondo (`#212022`) **es** el `night-800` del degradado.
+Si prefieres que se recorte contra el crema, exporta un PNG con transparencia y cambia la
+extensión en `index.html` y `js/views-auth.js`.
+
+---
+
+## 6 · Estructura
 
 ```
 CLIDANFI/
-├── index.html                 Shell: cabecera, chip de usuario, nav inferior
+├── index.html                 Shell: marco, cabecera, chip de usuario, nav
 ├── netlify.toml               Build, cabeceras de seguridad y caché
-├── package.json               Scripts y dependencias
 ├── tailwind.config.js         Paleta de marca y tokens
 ├── css/
 │   ├── input.css              Entrada de Tailwind (fuente)
-│   ├── tailwind.css           GENERADO · 32 KB
-│   └── styles.css             Lo que Tailwind no cubre
+│   ├── tailwind.css           GENERADO
+│   └── styles.css             Escritorio, animaciones, formularios, impresión
 ├── js/
-│   ├── env.js                 GENERADO desde variables de entorno
+│   ├── env.js                 GENERADO · credenciales
 │   ├── env.example.js         Plantilla
-│   ├── vendor/supabase.js     GENERADO · cliente UMD copiado de node_modules
-│   ├── ui.js                  Formato, iconos SVG, toasts, sheets, imágenes
-│   ├── store.js               Modo demostración + catálogos clínicos
-│   ├── api.js                 ◄ CAPA DE DATOS (local) + autorización
-│   ├── api-supabase.js        ◄ CAPA DE DATOS (Supabase) · misma firma
-│   ├── views-auth.js          Pantalla de acceso
+│   ├── vendor/supabase.js     GENERADO · cliente UMD desde node_modules
+│   ├── supabase-client.js     ◄ ÚNICO punto donde se crea el cliente
+│   ├── ui.js                  Formato, iconos SVG, toasts, paneles, imágenes
+│   ├── store.js               Catálogos clínicos (sin datos ni persistencia)
+│   ├── api.js                 ◄ CAPA DE DATOS + matriz de autorización
+│   ├── views-auth.js          Acceso y pantalla de configuración
 │   ├── views-therapist.js     Vista fisioterapeuta
 │   ├── views-patient.js       Vista paciente
 │   └── app.js                 Router + guardia de sesión
@@ -189,33 +228,36 @@ CLIDANFI/
 └── assets/                    Aquí va el logo (ver assets/LEER-ME.txt)
 ```
 
-**Regla de oro:** ninguna vista toca `localStorage` ni Supabase. Todo pasa por `API.*`, y ambas
-implementaciones exportan las mismas 46 funciones. Por eso cambiar de modo demostración a
-producción no altera ni una línea de las vistas.
+**Regla de oro:** ninguna vista consulta Supabase por su cuenta. Todo pasa por `API.*`, y el
+cliente se crea una sola vez en `supabase-client.js`.
 
 ---
 
-## 6 · Funcionalidad
+## 7 · Funcionalidad
 
 ### Fisioterapeuta
 
 | Módulo | Qué hace |
 |---|---|
-| **Dashboard** | Ingresos de la semana con gráfica por día, comparativo contra la semana anterior, ticket promedio, KPIs y agenda de hoy. |
-| **Agenda** | Citas de hoy / próximos 21 días agrupadas por día. Registrar asistencia, reagendar, marcar "no asistió" o eliminar. |
-| **Pacientes** | Lista **ordenada por fecha de última asistencia** (más reciente arriba). Buscador con *debounce* que ignora acentos. |
-| **Ficha** | Pestañas Resumen · Valoración · Historial · Rutinas. |
-| **Valoración inicial** | **13 secciones activables con switch** según la dolencia (EVA, postural, goniometría, Daniels, pruebas especiales por región, marcha, neurológica…) sobre un motor de 9 tipos de campo. |
-| **Historial** | Línea de tiempo con EVA y **captura de fotos** desde la cámara (test de marcha, postura, radiografías), comprimidas antes de subirse. |
-| **Rutinas** | Catálogo visual de 22 ejercicios con filtros. Cada guardado crea una versión que queda **activa y arriba**; el resto es historial por fecha. |
-| **Sorteos** | Crear sorteo, **1 boleto automático por asistencia**, participantes, sorteo con animación y publicación controlada del ganador. |
+| **Dashboard** | Ingresos de la semana con gráfica por día, comparativo, ticket promedio, KPIs y agenda de hoy. |
+| **Agenda** | Citas de hoy / próximos 21 días. Registrar asistencia, reagendar, marcar "no asistió" o eliminar. |
+| **Pacientes** | Lista **ordenada por fecha de última asistencia**. Buscador que ignora acentos. |
+| **Ficha** | Resumen · Valoración · Historial · Rutinas. |
+| **Valoración inicial** | **13 secciones activables con switch** según la dolencia, sobre un motor de 9 tipos de campo. |
+| **Historial** | Línea de tiempo con EVA y captura de fotos desde la cámara, comprimidas antes de subirse. |
+| **Rutinas** | Catálogo visual de 22 ejercicios. Cada guardado crea una versión **activa y arriba**; el resto es histórico. |
+| **Sorteos** | Crear sorteo, **1 boleto automático por asistencia**, participantes, sorteo animado y publicación controlada del ganador. |
 | **Promociones** | Alta, listado y baja con vigencia. |
+
+Todos los botones de guardar y editar están siempre operativos; los errores del servidor se
+muestran como aviso en pantalla, incluidos los de permisos. En **Mi cuenta** se confirma si
+el perfil tiene permisos de edición y contra qué proyecto de Supabase está conectado.
 
 ### Paciente
 
-Ve **únicamente lo suyo**: próxima cita, estatus de su paquete con anillo de progreso, su rutina
-activa con imágenes/series/repeticiones y checklist diario, rutinas anteriores, promociones
-vigentes y sus boletos de sorteo con los códigos y el historial de ganadores.
+Ve **únicamente lo suyo**: próxima cita, estatus de su paquete con anillo de progreso, su
+rutina activa con imágenes/series/repeticiones y checklist diario, rutinas anteriores,
+promociones vigentes y sus boletos de sorteo con el historial de ganadores.
 
 ### La cascada que amarra todo
 
@@ -226,39 +268,21 @@ Registrar una asistencia dispara, en una sola operación:
 3. Registra el ingreso, visible en la gráfica del dashboard.
 4. Emite **un boleto por cada sorteo activo vigente**, visible de inmediato para el paciente.
 
-En Supabase esto lo hace el trigger `trg_boletos_asistencia`, y la restricción
-`unique (sorteo_id, asistencia_id)` garantiza la idempotencia desde la propia base de datos.
-
----
-
-## 7 · Personalización
-
-| Qué | Dónde |
-|---|---|
-| Logo | `assets/logo-clidanfi.svg` (ver `assets/LEER-ME.txt`) |
-| Colores de marca | `tailwind.config.js` → `colors.brand` |
-| Precio por sesión | `js/store.js` → `config.precio_sesion` |
-| Catálogo de ejercicios | `js/store.js` → `CATALOGO_EJERCICIOS` y tabla `ejercicios` |
-| Secciones de la valoración | `js/store.js` → `SECCIONES_VALORACION` |
-
-Para añadir una sección a la valoración basta con agregar un objeto al arreglo: el formulario,
-el guardado y la vista de resumen se generan solos.
-
-> **Importante con Tailwind compilado:** las clases nunca deben construirse por interpolación
-> (`bg-${tono}-100` no se detecta al purgar y desaparecería del CSS). Pásalas siempre completas,
-> como hace `kpi(icono, valor, label, 'bg-emerald-100 text-emerald-700')`.
+Lo hace el trigger `trg_boletos_asistencia`, y `unique (sorteo_id, asistencia_id)` garantiza
+la idempotencia desde la propia base de datos.
 
 ---
 
 ## 8 · Notas técnicas
 
-- **Tailwind compilado**: 32 KB con 443 clases, sin CDN ni advertencias en consola.
+- **Tailwind compilado**: ~32 KB, sin CDN ni advertencias en consola. Las clases nunca deben
+  construirse por interpolación (`bg-${tono}-100` no se detecta al purgar): pásalas completas,
+  como en `kpi(icono, valor, label, 'bg-emerald-100 text-emerald-700')`.
 - **Sin scripts externos**: el cliente de Supabase se sirve desde el propio dominio, lo que
   permite mantener `script-src 'self'` en la CSP.
 - **Cabeceras** en `netlify.toml`: CSP, HSTS, `X-Frame-Options: DENY`, `Permissions-Policy`
   (cámara permitida solo al propio origen, para las fotos de pruebas).
-- **Caché**: HTML y `env.js` sin caché para que un deploy se vea al instante; CSS y assets 7 días.
-- Router por hash, contenedor de 480 px centrado en escritorio, áreas táctiles ≥ 44 px,
-  `env(safe-area-inset-*)` para el notch y `prefers-reduced-motion` respetado.
-- En modo demostración las fotos se guardan como data-URL comprimidas (máx. 900 px, JPEG 72 %);
-  con Supabase van al bucket privado `evidencias` con URL firmada.
+- Router por hash, áreas táctiles ≥ 44 px, `env(safe-area-inset-*)` para el notch y
+  `prefers-reduced-motion` respetado.
+- Las fotos de evidencias se comprimen en el navegador (máx. 900 px, JPEG 72 %) y van al
+  bucket privado `evidencias` con URL firmada.

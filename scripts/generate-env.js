@@ -59,6 +59,10 @@ window.CLIDANFI_ENV = {
 fs.mkdirSync(path.dirname(DESTINO), { recursive: true });
 fs.writeFileSync(DESTINO, contenido, 'utf8');
 
-console.log(url && key
-  ? `[CLIDANFI] js/env.js generado → Supabase ${url}`
-  : '[CLIDANFI] js/env.js generado SIN credenciales → la app arrancará en modo demostración.');
+if (url && key) {
+  console.log(`[CLIDANFI] js/env.js generado → Supabase ${url}`);
+} else {
+  console.warn('[CLIDANFI] js/env.js generado SIN credenciales.');
+  console.warn('           La aplicación mostrará la pantalla de configuración en vez de arrancar.');
+  console.warn('           Define SUPABASE_URL y SUPABASE_ANON_KEY (o edita js/env.js a mano).');
+}

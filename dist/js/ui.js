@@ -144,11 +144,12 @@
   };
 
   /* ------------------------------------------------------- Imágenes SVG    */
+  // Tonos derivados del logotipo (rojo #921f23 · crema #ded6ca)
   const PALETTES = {
-    Cervical:  ['#ccfbf1', '#0f766e'], Hombro:  ['#dbeafe', '#1d4ed8'],
-    Lumbar:    ['#fef3c7', '#b45309'], Cadera:  ['#fae8ff', '#a21caf'],
-    Rodilla:   ['#dcfce7', '#15803d'], Tobillo: ['#ffe4e6', '#be123c'],
-    Core:      ['#e0e7ff', '#4338ca'], Movilidad:['#cffafe', '#0e7490']
+    Cervical:  ['#fbe3e4', '#921f23'], Hombro:   ['#efe9df', '#5b5852'],
+    Lumbar:    ['#f6cbcd', '#7a1d21'], Cadera:   ['#ded6ca', '#43413c'],
+    Rodilla:   ['#f8f4ed', '#78756f'], Tobillo:  ['#f6d3cf', '#8f2a20'],
+    Core:      ['#eda3a7', '#661d20'], Movilidad:['#e4e2dd', '#5b5852']
   };
 
   /**
@@ -156,7 +157,7 @@
    * Cuando subas fotos reales a Supabase Storage, `image_url` gana.
    */
   const placeholderImage = (label, category) => {
-    const [bg, fg] = PALETTES[category] || ['#e2e8f0', '#475569'];
+    const [bg, fg] = PALETTES[category] || ['#e4e2dd', '#5b5852'];
     const txt = escapeHtml(String(label || '').slice(0, 22));
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220">
       <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">

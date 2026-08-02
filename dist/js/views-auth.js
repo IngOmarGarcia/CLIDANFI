@@ -1,39 +1,40 @@
 /* ==========================================================================
-   CLIDANFI · views-auth.js  ·  PANTALLA DE ACCESO
-   Puerta de entrada obligatoria. Sin sesión válida no se renderiza ninguna
-   otra vista (el guardia está en app.js).
+   CLIDANFI · views-auth.js
+   Puerta de entrada obligatoria + pantalla de configuración.
+   Sin sesión válida no se renderiza ninguna otra vista (guardia en app.js).
    ========================================================================== */
 (function (global) {
   'use strict';
 
   const { escapeHtml: E, icon, toast } = UI;
 
-  /** ¿Estamos contra Supabase o en modo demostración con datos locales? */
-  const esDemo = () => API._impl !== 'supabase';
+  /* ======================================================================
+     BLOQUE DE MARCA (logo + nombre)
+     El <img> queda limpio: en cuanto exista assets/logo-clidanfi.jpeg se ve.
+     ====================================================================== */
+  const marca = () => `
+    <div class="mb-8 flex flex-col items-center text-center">
+      <!-- ▼ LOGO DE LA CLÍNICA ▼ -->
+      <img
+        src="./assets/logo-clidanfi.jpeg"
+        alt="Logo de CLIDANFI, clínica de fisioterapia"
+        width="88" height="88"
+        class="h-20 w-20 rounded-2xl object-contain"
+        onerror="this.classList.add('logo-fallback'); this.removeAttribute('src');"
+      />
+      <!-- ▲ FIN LOGO ▲ -->
+      <h1 class="mt-4 text-[26px] font-extrabold tracking-tight text-ink-900">CLIDANFI</h1>
+      <p class="mt-1 text-[13px] font-medium text-ink-500">Fisioterapia y rehabilitación</p>
+    </div>`;
 
+  /* ======================================================================
+     1 · ACCESO
+     ====================================================================== */
   async function login() {
-    const demo = esDemo();
-    const cuentas = demo ? (Store.USUARIOS_DEMO || []) : [];
-
     const html = `
       <div class="flex min-h-[100dvh] flex-col justify-center px-6 py-10 anim-fade-up">
+        ${marca()}
 
-        <!-- Marca -->
-        <div class="mb-8 flex flex-col items-center text-center">
-          <!-- ▼ ESPACIO RESERVADO PARA EL LOGO DE LA CLÍNICA ▼ -->
-          <img
-            src="./assets/logo-clidanfi.svg"
-            alt="Logo de CLIDANFI, clínica de fisioterapia"
-            width="80" height="80"
-            class="h-20 w-20 rounded-2xl object-contain"
-            onerror="this.classList.add('logo-fallback'); this.removeAttribute('src');"
-          />
-          <!-- ▲ FIN ESPACIO RESERVADO PARA EL LOGO ▲ -->
-          <h1 class="mt-4 text-[26px] font-extrabold tracking-tight text-ink-900">CLIDANFI</h1>
-          <p class="mt-1 text-[13px] font-medium text-ink-500">Fisioterapia y rehabilitación</p>
-        </div>
-
-        <!-- Formulario -->
         <form id="form-login" novalidate class="space-y-3.5" autocomplete="on">
           <div>
             <label for="login-email" class="mb-1 block text-[12px] font-bold text-ink-700">Correo electrónico</label>
@@ -54,39 +55,18 @@
           </div>
 
           <p id="login-error" role="alert" aria-live="polite"
-             class="hidden items-start gap-2 rounded-xl bg-rose-50 px-3 py-2.5 text-[12.5px] font-semibold leading-snug text-rose-700 ring-1 ring-rose-200"></p>
+             class="hidden items-start gap-2 rounded-xl bg-brand-50 px-3 py-2.5 text-[12.5px] font-semibold leading-snug text-brand-800 ring-1 ring-brand-200"></p>
 
           <button id="btn-login" type="submit"
             class="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-[15px] font-extrabold text-white shadow-card transition active:scale-[.98] disabled:opacity-60">
             <span id="btn-login-texto">Entrar</span>
           </button>
-        </form>
 
-        ${demo ? `
-          <!-- Aviso y accesos del modo demostración -->
-          <div class="mt-7 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <p class="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-amber-700">
-              ${icon('alert', 'h-3.5 w-3.5')} Modo demostración
-            </p>
-            <p class="mt-1 text-[12px] font-medium leading-snug text-amber-900">
-              Supabase no está configurado, así que los datos viven solo en este navegador.
-              Usa una de estas cuentas de prueba:
-            </p>
-            <div class="mt-3 space-y-2">
-              ${cuentas.map((u) => `
-                <button type="button" data-cuenta="${E(u.email)}" data-pass="${E(u.password)}"
-                  class="flex w-full items-center gap-3 rounded-xl border border-amber-200 bg-white p-2.5 text-left active:scale-[.99]">
-                  <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg ${u.rol === 'fisio' ? 'bg-brand-100 text-brand-700' : 'bg-violet-100 text-violet-700'}">
-                    ${icon(u.rol === 'fisio' ? 'stethoscope' : 'user', 'h-4 w-4')}
-                  </span>
-                  <span class="min-w-0 flex-1">
-                    <span class="block truncate text-[12.5px] font-bold text-ink-800">${E(u.rol === 'fisio' ? 'Fisioterapeuta' : 'Paciente')}</span>
-                    <span class="block truncate font-mono text-[11px] text-ink-500">${E(u.email)} · ${E(u.password)}</span>
-                  </span>
-                  <span class="shrink-0 text-[11px] font-extrabold text-amber-700">Usar</span>
-                </button>`).join('')}
-            </div>
-          </div>` : ''}
+          <button type="button" id="btn-recuperar"
+            class="w-full py-1 text-center text-[12.5px] font-bold text-brand-700 active:opacity-70">
+            ¿Olvidaste tu contraseña?
+          </button>
+        </form>
 
         <p class="mt-8 text-center text-[11px] leading-relaxed text-ink-400">
           Al entrar aceptas el tratamiento de tus datos clínicos<br />conforme al aviso de privacidad de la clínica.
@@ -110,7 +90,6 @@
 
       [email, pass].forEach((i) => i.addEventListener('input', limpiarError));
 
-      // Mostrar / ocultar contraseña
       root.querySelector('#ver-password').addEventListener('click', (e) => {
         const visible = pass.type === 'text';
         pass.type = visible ? 'password' : 'text';
@@ -119,18 +98,17 @@
         pass.focus();
       });
 
-      // Rellenar con una cuenta de demostración
-      root.querySelectorAll('[data-cuenta]').forEach((b) => b.addEventListener('click', () => {
-        email.value = b.dataset.cuenta;
-        pass.value = b.dataset.pass;
-        limpiarError();
-        form.requestSubmit();
-      }));
+      root.querySelector('#btn-recuperar').addEventListener('click', async () => {
+        if (!email.value.trim()) { mostrarError('Escribe tu correo para enviarte el enlace.'); return email.focus(); }
+        try {
+          await API.auth.recuperar(email.value);
+          toast('Te enviamos un enlace para restablecer tu contraseña', 'success', 4000);
+        } catch (err) { mostrarError(err.message || 'No se pudo enviar el enlace.'); }
+      });
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         limpiarError();
-
         if (!email.value.trim() || !pass.value) return mostrarError('Escribe tu correo y contraseña.');
 
         boton.disabled = true;
@@ -138,7 +116,7 @@
         try {
           await API.auth.entrar(email.value, pass.value);
           toast('Sesión iniciada');
-          await App.entrar();               // el router decide el destino según el rol
+          await App.entrar();
         } catch (err) {
           mostrarError(err.message || 'No se pudo iniciar sesión.');
           pass.value = '';
@@ -155,5 +133,95 @@
     return { titulo: 'Acceso', html, onMount, pantallaCompleta: true };
   }
 
-  global.VistaAuth = { login, esDemo };
+  /* ======================================================================
+     2 · CONFIGURACIÓN REQUERIDA
+     Sustituye al antiguo "modo demostración": si falta configuración se dice
+     exactamente qué falta y cómo arreglarlo, en vez de arrancar con datos
+     falsos que luego no coinciden con la base real.
+     ====================================================================== */
+  const AYUDA = {
+    'sin-env': {
+      titulo: 'Falta el archivo de credenciales',
+      pasos: [
+        'Copia <code>js/env.example.js</code> a <code>js/env.js</code>.',
+        'O ejecuta <code>npm run env</code> con las variables de entorno definidas.'
+      ]
+    },
+    'sin-credenciales': {
+      titulo: 'Faltan las credenciales de Supabase',
+      pasos: [
+        'Abre <code>js/env.js</code>.',
+        'Pega <code>SUPABASE_URL</code> y <code>SUPABASE_ANON_KEY</code> desde Supabase → Project Settings → API.',
+        'En Netlify, defínelas en Site configuration → Environment variables y vuelve a desplegar.'
+      ]
+    },
+    'url-invalida': {
+      titulo: 'La URL de Supabase no es válida',
+      pasos: ['Debe tener la forma <code>https://xxxxxxxx.supabase.co</code>, sin barra final.']
+    },
+    'key-invalida': {
+      titulo: 'La clave de Supabase no es válida',
+      pasos: ['Copia la <code>anon public</code> key completa desde Project Settings → API.']
+    },
+    'key-peligrosa': {
+      titulo: 'Estás usando la clave equivocada',
+      pasos: [
+        'La <code>service_role</code> key ignora las políticas de seguridad y <strong>nunca</strong> debe ir en el navegador.',
+        'Sustitúyela por la <code>anon public</code> key.'
+      ]
+    },
+    'sin-libreria': {
+      titulo: 'Falta el cliente de Supabase',
+      pasos: ['Ejecuta <code>npm install</code> en la carpeta del proyecto.']
+    }
+  };
+
+  async function configuracion() {
+    const fallo = global.CLIDANFI_FALLO || { codigo: 'desconocido', mensaje: 'Configuración incompleta.' };
+    const ayuda = AYUDA[fallo.codigo] || { titulo: 'Configuración incompleta', pasos: [] };
+
+    const html = `
+      <div class="flex min-h-[100dvh] flex-col justify-center px-6 py-10 anim-fade-up">
+        ${marca()}
+
+        <div class="rounded-2xl border border-brand-200 bg-brand-50 p-4">
+          <p class="flex items-center gap-2 text-[13.5px] font-extrabold text-brand-800">
+            ${icon('alert', 'h-4 w-4 shrink-0')} ${E(ayuda.titulo)}
+          </p>
+          <p class="mt-1.5 text-[12.5px] leading-snug text-brand-900">${E(fallo.mensaje)}</p>
+        </div>
+
+        ${ayuda.pasos.length ? `
+          <div class="mt-4 rounded-2xl border border-ink-200 bg-white p-4">
+            <p class="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Cómo resolverlo</p>
+            <ol class="space-y-2.5">
+              ${ayuda.pasos.map((p, i) => `
+                <li class="flex gap-2.5">
+                  <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-600 text-[11px] font-extrabold text-white">${i + 1}</span>
+                  <span class="text-[12.5px] leading-snug text-ink-700">${p}</span>
+                </li>`).join('')}
+            </ol>
+          </div>` : ''}
+
+        <div class="mt-4 rounded-2xl bg-ink-100 p-3.5">
+          <p class="text-[11.5px] leading-relaxed text-ink-600">
+            La <code class="rounded bg-ink-200 px-1 font-mono text-[11px]">anon key</code> es pública por diseño:
+            viaja al navegador en cualquier aplicación de Supabase. Lo que protege los datos son las
+            políticas RLS del servidor, no ocultar esa clave.
+          </p>
+        </div>
+
+        <button id="btn-recargar"
+          class="mt-5 w-full rounded-2xl bg-ink-900 py-3.5 text-[14.5px] font-extrabold text-white active:scale-[.98]">
+          Recargar
+        </button>
+      </div>`;
+
+    const onMount = (root) =>
+      root.querySelector('#btn-recargar').addEventListener('click', () => location.reload());
+
+    return { titulo: 'Configuración', html, onMount, pantallaCompleta: true };
+  }
+
+  global.VistaAuth = { login, configuracion, marca };
 })(window);

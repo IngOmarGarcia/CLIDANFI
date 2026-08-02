@@ -88,14 +88,32 @@
     const root = document.getElementById('view-root');
 
     try {
-      /* --- Puerta: sin sesión, solo la pantalla de acceso --------------- */
+      /* --- Puerta 1: sin configuración válida no hay aplicación --------- */
+      if (!global.CLIDANFI_LISTO) {
+        estado.ruta = null;
+        const vista = await VistaAuth.configuracion();
+        mostrarChrome(false);
+        root.innerHTML = vista.html;
+        irArriba(root);
+        if (vista.onMount) vista.onMount(root);
+        return;
+      }
+
+      /* --- Puerta 2: sin sesión, solo la pantalla de acceso ------------- */
       if (!autenticado()) {
         estado.ruta = null;
         const vista = await VistaAuth.login();
         mostrarChrome(false);
         root.innerHTML = vista.html;
-        window.scrollTo(0, 0);
+        irArriba(root);
         if (vista.onMount) vista.onMount(root);
+        return;
+      }
+
+      /* --- Puerta 3: rol desconocido ------------------------------------ */
+      if (!NAV[rol()]) {
+        mostrarChrome(false);
+        root.innerHTML = pantallaRolInvalido();
         return;
       }
 
@@ -116,7 +134,7 @@
 
       mostrarChrome(true);
       root.innerHTML = resultado.html;
-      window.scrollTo(0, 0);
+      irArriba(root);
 
       pintarBarraContexto(resultado);
       pintarNav();
@@ -131,6 +149,36 @@
     }
   }
 
+  /**
+   * Vuelve arriba. En móvil se desplaza el documento; en escritorio el que
+   * tiene el scroll es #view-root, dentro del marco.
+   */
+  function irArriba(root) {
+    window.scrollTo(0, 0);
+    if (root) root.scrollTop = 0;
+  }
+
+  /** El perfil existe pero su rol no corresponde a ninguna vista. */
+  function pantallaRolInvalido() {
+    const r = estado.sesion.perfil.rol;
+    return `
+      <div class="flex min-h-[100dvh] flex-col justify-center px-6 py-10">
+        <div class="rounded-2xl border border-brand-200 bg-brand-50 p-4">
+          <p class="flex items-center gap-2 text-[13.5px] font-extrabold text-brand-800">
+            ${icon('alert', 'h-4 w-4')} Rol no reconocido
+          </p>
+          <p class="mt-1.5 text-[12.5px] leading-snug text-brand-900">
+            Tu perfil tiene el rol <code class="rounded bg-brand-100 px-1 font-mono">${E(String(r))}</code>,
+            que no corresponde a ninguna vista. Debe ser <code class="rounded bg-brand-100 px-1 font-mono">fisio</code>
+            o <code class="rounded bg-brand-100 px-1 font-mono">paciente</code>.
+          </p>
+        </div>
+        <button data-action="cerrar-sesion" class="mt-5 w-full rounded-2xl bg-ink-900 py-3.5 text-[14.5px] font-extrabold text-white active:scale-[.98]">
+          Cerrar sesión
+        </button>
+      </div>`;
+  }
+
   function pintarError(root, err) {
     const denegado = /Acceso denegado|Sesión no iniciada/i.test(err.message || '');
     root.innerHTML = `
@@ -142,7 +190,6 @@
           <p class="mt-1 text-[12px] ${denegado ? 'text-amber-700' : 'text-rose-700'}">${E(err.message || String(err))}</p>
           <div class="mt-3 flex gap-2">
             <button data-action="ir-inicio" class="rounded-lg bg-ink-800 px-3 py-2 text-[12.5px] font-bold text-white">Volver al inicio</button>
-            ${denegado ? '' : `<button data-action="reiniciar-datos" class="rounded-lg bg-rose-600 px-3 py-2 text-[12.5px] font-bold text-white">Reiniciar datos</button>`}
           </div>
         </div>
       </div>`;
@@ -240,7 +287,8 @@
 
   function sheetCuenta() {
     const p = estado.sesion.perfil;
-    const conectado = API._impl === 'supabase';
+    const url = (global.CLIDANFI_ENV || {}).SUPABASE_URL || '';
+    const esFisio = p.rol === 'fisio';
 
     openSheet({
       title: 'Mi cuenta',
@@ -257,25 +305,39 @@
             </div>
           </div>
 
-          <div class="flex items-start gap-2.5 rounded-xl border ${conectado ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'} p-3">
-            <span class="mt-0.5 ${conectado ? 'text-emerald-600' : 'text-amber-600'}">${icon('shield', 'h-4 w-4')}</span>
+          <div class="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <span class="mt-0.5 text-emerald-600">${icon('shield', 'h-4 w-4')}</span>
             <div class="min-w-0">
-              <p class="text-[12.5px] font-extrabold ${conectado ? 'text-emerald-800' : 'text-amber-800'}">
-                ${conectado ? 'Conectado a Supabase' : 'Modo demostración'}
-              </p>
-              <p class="mt-0.5 text-[11.5px] leading-snug ${conectado ? 'text-emerald-700' : 'text-amber-700'}">
-                ${conectado
-                  ? 'Tus datos viajan cifrados y el acceso lo controlan las políticas RLS del servidor.'
-                  : 'Los datos viven solo en este navegador. Configura SUPABASE_URL y SUPABASE_ANON_KEY para usarlo en producción.'}
+              <p class="text-[12.5px] font-extrabold text-emerald-800">Conectado a Supabase</p>
+              <p class="mt-0.5 break-all text-[11px] font-mono leading-snug text-emerald-700">${E(url)}</p>
+              <p class="mt-1 text-[11.5px] leading-snug text-emerald-700">
+                El acceso lo controlan las políticas RLS del servidor.
               </p>
             </div>
           </div>
 
-          ${!conectado ? `
-            <button data-action="reiniciar-datos" class="flex w-full items-center gap-3 rounded-xl border border-ink-200 p-3 text-left active:bg-ink-50">
-              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-ink-100 text-ink-600">${icon('refresh', 'h-4 w-4')}</span>
-              <span class="text-[13.5px] font-bold text-ink-700">Reiniciar datos de prueba</span>
-            </button>` : ''}
+          ${esFisio ? `
+            <div class="flex items-start gap-2.5 rounded-xl border border-ink-200 bg-white p-3">
+              <span class="mt-0.5 text-brand-600">${icon('lock', 'h-4 w-4')}</span>
+              <div class="min-w-0">
+                <p class="text-[12.5px] font-extrabold text-ink-800">Permisos de edición activos</p>
+                <p class="mt-0.5 text-[11.5px] leading-snug text-ink-500">
+                  Tu perfil es <strong>fisio</strong>, así que puedes crear y editar pacientes,
+                  citas, valoraciones, rutinas y sorteos.
+                </p>
+              </div>
+            </div>` : `
+            <div class="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <span class="mt-0.5 text-amber-600">${icon('info', 'h-4 w-4')}</span>
+              <div class="min-w-0">
+                <p class="text-[12.5px] font-extrabold text-amber-800">Cuenta de solo lectura</p>
+                <p class="mt-0.5 text-[11.5px] leading-snug text-amber-700">
+                  Tu perfil es <strong>paciente</strong>: ves tu expediente pero no puedes editarlo.
+                  Si deberías ser fisioterapeuta, pide que promuevan tu cuenta en la tabla
+                  <code class="rounded bg-amber-100 px-1 font-mono text-[10.5px]">perfiles</code>.
+                </p>
+              </div>
+            </div>`}
 
           <button data-action="cerrar-sesion" class="flex w-full items-center gap-3 rounded-xl border border-rose-200 p-3 text-left active:bg-rose-50">
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-rose-100 text-rose-600">${icon('logout', 'h-4 w-4')}</span>
@@ -358,17 +420,7 @@
       render();
     },
     'ver-promos':  () => VistaFisio.sheetPromos(),
-    'nueva-promo': () => VistaFisio.sheetPromoForm(),
-
-    /* --- utilidades --- */
-    'reiniciar-datos': async () => {
-      const ok = await confirmSheet({
-        title: 'Reiniciar datos de prueba',
-        message: 'Se borrará todo lo capturado en este navegador y se volverá a generar la información mínima de demostración.',
-        confirmText: 'Reiniciar', tone: 'danger'
-      });
-      if (ok) { Store.reset(); toast('Datos reiniciados'); render(); }
-    }
+    'nueva-promo': () => VistaFisio.sheetPromoForm()
   };
 
   document.addEventListener('click', (e) => {
@@ -388,8 +440,18 @@
      ====================================================================== */
   window.addEventListener('hashchange', () => { closeSheet(); render(); });
 
+  /* Red de seguridad: cualquier promesa sin capturar (por ejemplo el guardado
+     dentro de un panel) se muestra al usuario en vez de morir en la consola. */
+  window.addEventListener('unhandledrejection', (e) => {
+    const msg = (e.reason && e.reason.message) || String(e.reason || '');
+    if (!msg) return;
+    console.error('[CLIDANFI] Promesa sin capturar:', e.reason);
+    toast(msg, /Acceso denegado/.test(msg) ? 'warn' : 'error', 4500);
+  });
+
   document.addEventListener('DOMContentLoaded', async () => {
-    Store.load();
+    // Sin cliente de Supabase no hay API: se muestra la pantalla de configuración.
+    if (!global.CLIDANFI_LISTO || !global.API) return render();
 
     // Cambios de sesión desde fuera (otra pestaña, token expirado en Supabase)
     API.auth.onCambio(async (sesion) => {
