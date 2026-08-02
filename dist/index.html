@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5" />
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="description" content="CLIDANFI · Sistema de gestión para clínica de fisioterapia" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>CLIDANFI · Gestión Clínica</title>
+
+  <link rel="icon" href="./assets/logo-clidanfi.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./assets/logo-clidanfi.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind COMPILADO (npm run css). Sin CDN en producción. -->
+  <link rel="stylesheet" href="./css/tailwind.css" />
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+
+<body class="bg-ink-100 font-sans text-ink-900 antialiased">
+
+  <!-- Marco tipo teléfono en escritorio; a pantalla completa en móvil -->
+  <div class="mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col bg-ink-50 shadow-lift">
+
+    <!-- ============================ HEADER ============================ -->
+    <!-- Oculto mientras no haya sesión iniciada (lo controla app.js) -->
+    <header id="app-header" class="sticky top-0 z-30 hidden border-b border-ink-200/70 bg-white/85 backdrop-blur-xl">
+      <div class="flex items-center gap-3 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
+
+        <!-- ▼▼▼ ESPACIO RESERVADO PARA EL LOGO DE LA CLÍNICA ▼▼▼ -->
+        <!-- Sustituye el archivo en ./assets/ (ver assets/LEER-ME.txt) -->
+        <img
+          id="brand-logo"
+          src="./assets/logo-clidanfi.svg"
+          alt="Logo de CLIDANFI, clínica de fisioterapia"
+          width="44" height="44"
+          class="h-11 w-11 shrink-0 rounded-xl object-contain"
+          onerror="this.classList.add('logo-fallback'); this.removeAttribute('src');"
+        />
+        <!-- ▲▲▲ FIN ESPACIO RESERVADO PARA EL LOGO ▲▲▲ -->
+
+        <div class="min-w-0 flex-1">
+          <h1 class="truncate text-[15px] font-extrabold leading-tight tracking-tight text-ink-900">CLIDANFI</h1>
+          <p id="header-subtitle" class="truncate text-[11px] font-medium text-ink-500">Clínica de Fisioterapia</p>
+        </div>
+
+        <!-- Chip de usuario + acceso a la cuenta (lo pinta app.js) -->
+        <div id="user-chip" class="shrink-0"></div>
+      </div>
+
+      <!-- Barra contextual (volver + título de sección) -->
+      <div id="context-bar" class="hidden items-center gap-2 border-t border-ink-100 px-2 py-2"></div>
+    </header>
+
+    <!-- ============================ VISTA ============================ -->
+    <main id="view-root" class="flex-1 overflow-x-hidden"></main>
+
+    <!-- ========================= NAV INFERIOR ========================= -->
+    <nav id="bottom-nav"
+         class="fixed bottom-0 left-1/2 z-30 hidden w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200/70 bg-white/90 backdrop-blur-xl"
+         aria-label="Navegación principal"></nav>
+  </div>
+
+  <!-- Contenedores de overlays -->
+  <div id="sheet-root"></div>
+  <div id="toast-root" class="pointer-events-none fixed inset-x-0 top-3 z-[100] flex flex-col items-center gap-2 px-4"></div>
+
+  <!-- ============================================================
+       Scripts. Sin type="module" para que funcionen también con file://
+       ============================================================ -->
+
+  <!-- 1 · Variables de entorno (generado por scripts/generate-env.js) -->
+  <script src="./js/env.js"></script>
+
+  <!-- 2 · Cliente de Supabase (copiado a js/vendor por scripts/vendor.js).
+          Si no existe, la app arranca en modo demostración. -->
+  <script src="./js/vendor/supabase.js"></script>
+
+  <!-- 3 · Aplicación -->
+  <script src="./js/ui.js"></script>
+  <script src="./js/store.js"></script>
+  <script src="./js/api.js"></script>
+  <script src="./js/api-supabase.js"></script>
+  <script src="./js/views-auth.js"></script>
+  <script src="./js/views-therapist.js"></script>
+  <script src="./js/views-patient.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>

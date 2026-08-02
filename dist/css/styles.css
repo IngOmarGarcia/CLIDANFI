@@ -1,0 +1,139 @@
+/* ==========================================================================
+   CLIDANFI · Estilos complementarios a Tailwind
+   Solo lo que Tailwind no cubre bien: scrollbars, animaciones, safe-areas
+   y el placeholder del logo.
+   ========================================================================== */
+
+:root {
+  --brand-600: #0d9488;
+  --brand-700: #0f766e;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body { overscroll-behavior-y: none; }
+
+/* Evita el zoom automático de iOS al enfocar inputs */
+input, select, textarea { font-size: 16px; }
+@media (min-width: 480px) { input, select, textarea { font-size: 15px; } }
+
+/* --------------------------------------------------------------------------
+   Placeholder del logo: se activa solo si la imagen no carga.
+   Así el <img> queda limpio y listo para el logo real.
+   -------------------------------------------------------------------------- */
+.logo-fallback {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #ccfbf1, #99f6e4);
+  border: 1px dashed #14b8a6;
+  color: #0f766e;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-align: center;
+  line-height: 1.05;
+}
+.logo-fallback::after { content: "LOGO"; }
+
+/* --------------------------------------------------------------------------
+   Scroll horizontal sin barra (chips, catálogo)
+   -------------------------------------------------------------------------- */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+.scroll-x {
+  display: flex;
+  gap: .5rem;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-x > * { scroll-snap-align: start; flex: 0 0 auto; }
+
+/* --------------------------------------------------------------------------
+   Animaciones
+   -------------------------------------------------------------------------- */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes pop { 0% { transform: scale(.9); opacity: 0 } 60% { transform: scale(1.03) } 100% { transform: scale(1); opacity: 1 } }
+
+.anim-fade-up { animation: fadeUp .28s cubic-bezier(.2,.8,.3,1) both; }
+.anim-fade    { animation: fadeIn .2s ease both; }
+.anim-sheet   { animation: sheetUp .3s cubic-bezier(.2,.9,.3,1) both; }
+.anim-pop     { animation: pop .35s cubic-bezier(.2,.9,.3,1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* --------------------------------------------------------------------------
+   Estado activo del switch de rol y de la nav inferior (lo aplica app.js)
+   -------------------------------------------------------------------------- */
+.role-btn { color: #64748b; }
+.role-btn[aria-selected="true"] {
+  background: #fff;
+  color: var(--brand-700);
+  box-shadow: 0 1px 2px rgba(15,23,42,.12);
+}
+
+.nav-item { color: #94a3b8; }
+.nav-item[aria-current="page"] { color: var(--brand-700); }
+.nav-item[aria-current="page"] .nav-icon-wrap { background: #ccfbf1; }
+
+/* --------------------------------------------------------------------------
+   Safe area del nav inferior
+   -------------------------------------------------------------------------- */
+.nav-safe { padding-bottom: calc(.5rem + env(safe-area-inset-bottom)); }
+
+/* --------------------------------------------------------------------------
+   Inputs: estilo base reutilizable
+   -------------------------------------------------------------------------- */
+.field {
+  width: 100%;
+  border-radius: .75rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  padding: .625rem .75rem;
+  font-size: 15px;
+  color: #0f172a;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.field::placeholder { color: #94a3b8; }
+.field:focus { border-color: var(--brand-500, #14b8a6); box-shadow: 0 0 0 3px rgba(20,184,166,.15); }
+.field[disabled] { background: #f8fafc; color: #94a3b8; }
+
+textarea.field { min-height: 84px; resize: vertical; line-height: 1.5; }
+
+/* Slider EVA */
+input[type="range"].eva { accent-color: var(--brand-600); width: 100%; height: 24px; }
+
+/* Checkbox / radio con color de marca */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--brand-600); }
+
+/* --------------------------------------------------------------------------
+   Tabla compacta (goniometría, fuerza)
+   -------------------------------------------------------------------------- */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.tbl th { font-weight: 700; color: #64748b; text-align: left; padding: .35rem .4rem; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+.tbl td { padding: .2rem .25rem; }
+.tbl input { width: 100%; text-align: center; border-radius: .5rem; border: 1px solid #e2e8f0; padding: .35rem .25rem; font-size: 14px; }
+.tbl input:focus { outline: none; border-color: #14b8a6; box-shadow: 0 0 0 2px rgba(20,184,166,.15); }
+
+/* --------------------------------------------------------------------------
+   Mini gráfica de barras (ingresos)
+   -------------------------------------------------------------------------- */
+.bar { transition: height .5s cubic-bezier(.2,.9,.3,1); }
+
+/* --------------------------------------------------------------------------
+   Recorte de texto multilínea
+   -------------------------------------------------------------------------- */
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Impresión: oculta navegación para exportar fichas en PDF */
+@media print {
+  #app-header, #bottom-nav, #sheet-root, #toast-root, .no-print { display: none !important; }
+  #view-root { padding-bottom: 0 !important; }
+  body { background: #fff; }
+}
