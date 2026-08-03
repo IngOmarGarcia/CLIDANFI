@@ -23,14 +23,199 @@
     return API.miPaciente();
   }
 
-  /** Pantalla cuando la cuenta existe pero no está ligada a un expediente. */
-  const sinExpediente = () => ({
-    titulo: 'Sin expediente',
-    html: `<div class="px-4 pt-8">
-      ${emptyState('user', 'Tu cuenta aún no tiene expediente',
-        'Pide en recepción que vinculen tu cuenta con tu expediente clínico para ver tus citas y tu rutina.')}
-    </div>`
+  /**
+   * Secciones que exigen expediente (rutina, sorteos). En vez de un mensaje
+   * muerto, remite a la vitrina para pedir la primera cita.
+   */
+  const necesitaExpediente = (titulo, que) => ({
+    titulo,
+    html: `
+      <div class="space-y-4 px-4 pt-6 anim-fade-up">
+        ${emptyState('user', `Aún no tienes ${que}`,
+          'Se activa en cuanto la clínica cree tu expediente, después de tu primera cita.')}
+        <a href="#/p/inicio"
+          class="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">
+          ${icon('calendar', 'h-4.5 w-4.5')} Solicitar mi primera cita
+        </a>
+      </div>`
   });
+
+  /* ======================================================================
+     VITRINA · cuenta creada por autorregistro, todavía sin expediente
+     No es un callejón sin salida: aquí se enseñan promociones y sorteos, y
+     se puede pedir la primera cita.
+     ====================================================================== */
+  async function vitrina() {
+    const [promos, sorteos, solicitudes] = await Promise.all([
+      API.listarPromociones({ soloVigentes: true }),
+      API.sorteosVitrina(),
+      API.misSolicitudes()
+    ]);
+
+    const pendiente = solicitudes.find((s) => s.estado === 'nueva' || s.estado === 'contactada');
+    const activos = sorteos.filter((s) => s.vigente);
+
+    const html = `
+      <div class="anim-fade-up">
+
+        <div class="bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800 px-5 pb-20 pt-7 text-white">
+          <p class="text-[12px] font-bold uppercase tracking-wider text-brand-200">Bienvenido a</p>
+          <h2 class="mt-1 text-[26px] font-extrabold leading-tight tracking-tight">CLIDANFI</h2>
+          <p class="mt-1.5 text-[13px] leading-snug text-brand-100">
+            Terapia física y rehabilitación. Solicita tu primera cita y conoce los beneficios vigentes.
+          </p>
+        </div>
+
+        <div class="-mt-14 space-y-4 px-4 pb-4">
+
+          <!-- Primera cita -->
+          ${pendiente ? `
+            <section class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-card">
+              <div class="flex items-start gap-3">
+                <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-600 text-white">${icon('check', 'h-5 w-5')}</span>
+                <div class="min-w-0">
+                  <p class="text-[14px] font-extrabold text-emerald-900">Solicitud recibida</p>
+                  <p class="mt-0.5 text-[12.5px] leading-snug text-emerald-800">
+                    ${pendiente.estado === 'contactada'
+                      ? 'Ya te contactamos. En breve confirmamos tu cita.'
+                      : 'La clínica se pondrá en contacto contigo para confirmar día y hora.'}
+                  </p>
+                  <p class="mt-1 text-[11px] font-bold text-emerald-700">Enviada ${E(relDay(pendiente.creado_en))}</p>
+                </div>
+              </div>
+            </section>`
+            : `
+            <section class="rounded-2xl bg-white p-4 shadow-lift">
+              <div class="flex items-start gap-3">
+                <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-700">${icon('calendar', 'h-5 w-5')}</span>
+                <div class="min-w-0 flex-1">
+                  <p class="text-[15px] font-extrabold text-ink-900">Solicita tu primera cita</p>
+                  <p class="mt-0.5 text-[12.5px] leading-snug text-ink-500">
+                    Cuéntanos qué te pasa y te contactamos para agendarte.
+                  </p>
+                </div>
+              </div>
+              <button data-action="solicitar-cita"
+                class="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-[14.5px] font-extrabold text-white active:scale-[.98]">
+                ${icon('plus', 'h-4.5 w-4.5')} Pedir cita
+              </button>
+            </section>`}
+
+          <!-- Promociones -->
+          ${promos.length ? `
+            <div>
+              ${sectionTitle('Promociones vigentes')}
+              <div class="space-y-2.5">
+                ${promos.map((p) => `
+                  <article class="overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 p-4 text-white shadow-card">
+                    <span class="rounded-full bg-white/25 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider backdrop-blur">
+                      ${E(p.etiqueta || 'Promoción')}
+                    </span>
+                    <h3 class="mt-2.5 text-[17px] font-extrabold leading-tight">${E(p.titulo)}</h3>
+                    <p class="mt-1.5 text-[12.5px] leading-relaxed text-brand-100">${E(p.descripcion)}</p>
+                    <p class="mt-2.5 flex items-center gap-1.5 border-t border-white/25 pt-2 text-[11px] font-bold text-brand-100">
+                      ${icon('clock', 'h-3.5 w-3.5')} Hasta el ${E(fmtDate(p.hasta))}
+                    </p>
+                  </article>`).join('')}
+              </div>
+            </div>` : ''}
+
+          <!-- Sorteos -->
+          ${activos.length ? `
+            <div>
+              ${sectionTitle('Sorteos en curso')}
+              <div class="space-y-2.5">
+                ${activos.map((s) => `
+                  <article class="rounded-2xl border border-violet-200 bg-white p-4 shadow-card">
+                    <div class="flex items-start gap-3">
+                      <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-600 text-white">${icon('gift', 'h-5 w-5')}</span>
+                      <div class="min-w-0 flex-1">
+                        <p class="text-[14px] font-extrabold text-ink-900">${E(s.titulo)}</p>
+                        <p class="mt-0.5 text-[12.5px] leading-snug text-ink-600">${E(s.premio)}</p>
+                      </div>
+                    </div>
+                    <p class="mt-2.5 rounded-lg bg-violet-50 px-3 py-2 text-[11.5px] font-semibold leading-snug text-violet-800">
+                      Empieza tu tratamiento y ganas un boleto por cada asistencia. Cierra el ${E(fmtDate(s.termina_en))}.
+                    </p>
+                  </article>`).join('')}
+              </div>
+            </div>` : ''}
+
+          <!-- Qué obtienes al ser paciente -->
+          <div class="rounded-2xl border border-ink-200 bg-white p-4">
+            ${sectionTitle('Al iniciar tu tratamiento')}
+            <ul class="space-y-2.5">
+              ${[
+                ['clipboard', 'Valoración inicial completa', 'Exploración detallada para saber exactamente qué tratar.'],
+                ['dumbbell', 'Rutina personalizada', 'Ejercicios con series y repeticiones, siempre a la mano en tu celular.'],
+                ['ticket', 'Boletos de sorteo', 'Uno por cada asistencia, automáticamente.']
+              ].map(([ic, t, d]) => `
+                <li class="flex gap-3">
+                  <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-100 text-brand-700">${icon(ic, 'h-4 w-4')}</span>
+                  <span class="min-w-0">
+                    <span class="block text-[13px] font-bold text-ink-800">${E(t)}</span>
+                    <span class="block text-[11.5px] leading-snug text-ink-500">${E(d)}</span>
+                  </span>
+                </li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      </div>`;
+
+    return { titulo: 'Inicio', html };
+  }
+
+  /** Panel para pedir la primera cita. */
+  async function sheetSolicitarCita() {
+    const sesion = App.sesion;
+    openSheet({
+      title: 'Solicitar primera cita',
+      subtitle: 'Te contactamos para confirmar día y hora',
+      body: `
+        <div class="space-y-3">
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">Nombre completo *</label>
+            <input id="sol-nombre" class="field" value="${E(sesion ? sesion.perfil.nombre : '')}" placeholder="Nombre y apellidos" />
+          </div>
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">Teléfono *</label>
+            <input id="sol-tel" type="tel" inputmode="tel" class="field" placeholder="667 000 0000" />
+          </div>
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">¿Qué te pasa?</label>
+            <textarea id="sol-motivo" class="field" placeholder="Ej. dolor lumbar desde hace 3 semanas"></textarea>
+          </div>
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">¿Cuándo te viene mejor?</label>
+            <select id="sol-pref" class="field">
+              ${['Entre semana por la mañana', 'Entre semana por la tarde', 'Sábado por la mañana', 'Me acomoda cualquier horario']
+                .map((o) => `<option>${o}</option>`).join('')}
+            </select>
+          </div>
+          ${UI.avisoGuardado()}
+        </div>`,
+      footer: `<button id="btn-solicitar"
+                 class="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">
+                 ${icon('save', 'h-4.5 w-4.5')} Enviar solicitud</button>`,
+      onMount: (root) => {
+        const boton = root.querySelector('#btn-solicitar');
+        boton.addEventListener('click', () => {
+          const nombre = root.querySelector('#sol-nombre').value.trim();
+          const telefono = root.querySelector('#sol-tel').value.trim();
+          if (!nombre || !telefono) return toast('Escribe tu nombre y tu teléfono', 'error');
+
+          UI.guardarConEstado(boton, () => API.crearSolicitudCita({
+            nombre, telefono,
+            motivo: root.querySelector('#sol-motivo').value.trim(),
+            preferencia: root.querySelector('#sol-pref').value
+          }), {
+            textoOk: 'Solicitud enviada',
+            alTerminar: () => { closeSheet(); App.render(); }
+          }).catch(() => { /* el aviso ya se mostró en el panel */ });
+        });
+      }
+    });
+  }
 
   /* --------------------------------------- Checklist diario (local) ------ */
   const claveChecks = (pid) => `clidanfi.checks.${pid}.${isoDay(new Date())}`;
@@ -42,7 +227,7 @@
      ====================================================================== */
   async function inicio() {
     const p = await pacienteActual();
-    if (!p) return sinExpediente();
+    if (!p) return vitrina();          // autorregistro sin expediente
 
     const [prox, rutina, promos, sorteos] = await Promise.all([
       API.proximaCitaDePaciente(p.id),
@@ -176,7 +361,7 @@
      ====================================================================== */
   async function rutina() {
     const p = await pacienteActual();
-    if (!p) return sinExpediente();
+    if (!p) return necesitaExpediente('Mi rutina', 'una rutina asignada');
 
     const [activa, historial] = await Promise.all([API.rutinaActiva(p.id), API.rutinasDePaciente(p.id)]);
     const previas = historial.filter((r) => !activa || r.id !== activa.id);
@@ -408,7 +593,7 @@
      ====================================================================== */
   async function sorteos() {
     const p = await pacienteActual();
-    if (!p) return sinExpediente();
+    if (!p) return necesitaExpediente('Sorteos', 'boletos acumulados');
 
     const list = await API.misBoletos(p.id);
     const activos = list.filter((s) => s.estado === 'activo');
@@ -512,5 +697,5 @@
     return { titulo: 'Sorteos', html };
   }
 
-  global.VistaPaciente = { inicio, rutina, promociones, sorteos, pacienteActual };
+  global.VistaPaciente = { inicio, rutina, promociones, sorteos, pacienteActual, vitrina, sheetSolicitarCita };
 })(window);

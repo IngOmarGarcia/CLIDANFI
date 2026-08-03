@@ -130,6 +130,10 @@
       }
       estado.ruta = ruta;
 
+      // Al salir de una pantalla con formulario, el aviso de "sin guardar"
+      // deja de aplicar (si el usuario llegó aquí, ya confirmó la salida).
+      if (!/^\/t\/(valoracion|rutina)\//.test(ruta.path) && global.VistaFisio) VistaFisio.marcarLimpio();
+
       const resultado = await ruta.def.vista()(ruta.params, ruta.query);
 
       mostrarChrome(true);
@@ -357,7 +361,10 @@
     'abrir-cuenta':  () => sheetCuenta(),
     'cerrar-sesion': () => salir(),
     'ir-inicio':     () => { location.hash = INICIO[rol()] || ''; render(); },
-    'volver':        (el) => { if (el.dataset.href) location.hash = el.dataset.href; else history.back(); },
+    'volver':        async (el) => {
+      if (!(await confirmarSalida())) return;
+      if (el.dataset.href) location.hash = el.dataset.href; else history.back();
+    },
 
     /* --- pacientes --- */
     'nuevo-paciente':   () => VistaFisio.sheetPaciente(),
@@ -379,12 +386,23 @@
       if (ok) { await API.eliminarNota(el.dataset.id); toast('Nota eliminada'); render(); }
     },
 
+    /* Guardado explícito de la valoración: recoge TODOS los campos del
+       formulario (texto, número, deslizadores, casillas, desplegables, tablas
+       de goniometría/fuerza y pruebas especiales) y los envía en una sola
+       petición. Nada se ha persistido antes de pulsar aquí. */
     'guardar-valoracion': async (el) => {
       const root = document.getElementById('view-root');
       const { secciones_activas, datos } = VistaFisio.leerValoracion(root);
-      await API.guardarValoracion(el.dataset.id, { secciones_activas, datos, id: el.dataset.vid || null });
-      toast('Valoración guardada');
-      location.hash = `#/t/paciente/${el.dataset.id}?tab=valoracion`;
+
+      await UI.guardarConEstado(el,
+        () => API.guardarValoracion(el.dataset.id, { secciones_activas, datos, id: el.dataset.vid || null }),
+        {
+          textoOk: 'Valoración guardada',
+          alTerminar: () => {
+            VistaFisio.marcarLimpio();
+            location.hash = `#/t/paciente/${el.dataset.id}?tab=valoracion`;
+          }
+        }).catch(() => { /* el aviso ya quedó bajo el botón; no se sale de la pantalla */ });
     },
 
     /* --- rutinas --- */
@@ -397,16 +415,27 @@
       if (ok) { await API.eliminarRutina(el.dataset.id); toast('Rutina eliminada'); render(); }
     },
 
+    /* Guardado explícito de la rutina: título, indicaciones, ejercicios en su
+       orden y, por cada uno, series, repeticiones, segundos y el desplegable
+       de frecuencia. Todo en una sola petición al pulsar. */
     'guardar-rutina': async (el) => {
       const root = document.getElementById('view-root');
-      const items = global.__rutinaSeleccion || [];
+      const edicion = VistaFisio.rutinaEnEdicion();
+      const items = edicion ? edicion.items : [];
       if (!items.length) return toast('Agrega al menos un ejercicio', 'error');
+
       const titulo = root.querySelector('#rut-titulo').value.trim() || 'Rutina sin título';
       const notas = root.querySelector('#rut-notas').value.trim();
-      await API.guardarRutina(el.dataset.id, { titulo, notas, items, id: el.dataset.rid || null });
-      global.__rutinaSeleccion = null;
-      toast('Rutina guardada y activada');
-      location.hash = `#/t/paciente/${el.dataset.id}?tab=rutinas`;
+
+      await UI.guardarConEstado(el,
+        () => API.guardarRutina(el.dataset.id, { titulo, notas, items, id: el.dataset.rid || null }),
+        {
+          textoOk: 'Rutina guardada',
+          alTerminar: () => {
+            VistaFisio.marcarLimpio();
+            location.hash = `#/t/paciente/${el.dataset.id}?tab=rutinas`;
+          }
+        }).catch(() => { /* el aviso ya quedó bajo el botón */ });
     },
 
     /* --- sorteos y promociones --- */
@@ -420,7 +449,11 @@
       render();
     },
     'ver-promos':  () => VistaFisio.sheetPromos(),
-    'nueva-promo': () => VistaFisio.sheetPromoForm()
+    'nueva-promo': () => VistaFisio.sheetPromoForm(),
+
+    /* --- autorregistro --- */
+    'ver-solicitudes': () => VistaFisio.sheetSolicitudes(),
+    'solicitar-cita':  () => VistaPaciente.sheetSolicitarCita()
   };
 
   document.addEventListener('click', (e) => {
@@ -439,6 +472,44 @@
      ARRANQUE
      ====================================================================== */
   window.addEventListener('hashchange', () => { closeSheet(); render(); });
+
+  /* ======================================================================
+     CAMBIOS SIN GUARDAR
+     Como no hay autoguardado, salir de la valoración o del editor de rutinas
+     con ediciones pendientes las perdería. Estas tres barreras lo evitan.
+     ====================================================================== */
+
+  /** ¿Estamos en una pantalla con formulario y hay algo sin guardar? */
+  const haySinGuardar = () =>
+    !!(global.VistaFisio && VistaFisio.hayCambiosSinGuardar && VistaFisio.hayCambiosSinGuardar());
+
+  async function confirmarSalida() {
+    if (!haySinGuardar()) return true;
+    const salir = await confirmSheet({
+      title: 'Cambios sin guardar',
+      message: 'Si sales ahora se perderá lo que capturaste. ¿Quieres salir de todos modos?',
+      confirmText: 'Salir sin guardar',
+      tone: 'danger'
+    });
+    if (salir) VistaFisio.marcarLimpio();
+    return salir;
+  }
+
+  // 1 · Navegación por la barra inferior o cualquier enlace interno
+  document.addEventListener('click', async (e) => {
+    const enlace = e.target.closest('a[href^="#/"]');
+    if (!enlace || !haySinGuardar()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (await confirmarSalida()) location.hash = enlace.getAttribute('href');
+  }, true);
+
+  // 2 · Cerrar la pestaña o recargar
+  window.addEventListener('beforeunload', (e) => {
+    if (!haySinGuardar()) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
 
   /* Red de seguridad: cualquier promesa sin capturar (por ejemplo el guardado
      dentro de un panel) se muestra al usuario en vez de morir en la consola. */

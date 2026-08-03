@@ -59,6 +59,16 @@ antes de ejecutarlo. El script se detiene con un mensaje claro si se te olvida.
 > ves el portal del paciente en vez del panel, es que falta ese paso**: revisa la fila
 > correspondiente en la tabla `perfiles`.
 
+### ⚠ Confirmación de correo: obligatoria
+
+En **Authentication → Providers → Email**, la opción **«Confirm email» debe quedar
+ACTIVADA**.
+
+El autorregistro vincula la cuenta nueva con el expediente que ya tuviera ese mismo correo.
+Si desactivas la confirmación, cualquiera podría reclamar la historia clínica de otra persona
+con solo escribir su dirección. Por eso el trigger `vincular_expediente_por_correo` solo
+actúa cuando `email_confirmed_at` no es nulo.
+
 ---
 
 ## 2 · Desplegar en Netlify
@@ -115,10 +125,12 @@ de salir a la red y da mensajes claros.
 | `rutinas`, `rutina_items` | todo | lee solo las suyas |
 | `boletos` | todo | lee solo sus boletos |
 | `sorteos`, `promociones`, `ejercicios` | todo | lee solo lo publicado/activo |
+| `solicitudes_cita` | todo | crea y lee **las suyas** |
 | `perfiles` | todos | solo el suyo, sin poder cambiar su rol |
 
-- **Ningún rol `paciente` tiene políticas de INSERT/UPDATE/DELETE.** Solo lee. Manipular el
-  JavaScript del navegador no cambia eso: el rechazo ocurre en el servidor.
+- El rol `paciente` **solo lee** el expediente clínico. Su única escritura permitida es crear
+  su propia solicitud de cita (`solicitudes_cita`), y la política exige que el `usuario_id`
+  sea el suyo. Manipular el JavaScript del navegador no cambia eso: el rechazo es del servidor.
 - `es_mi_expediente(uuid)` ancla cada política a `pacientes.usuario_id`.
 - La vista `pacientes_ordenados` usa `security_invoker = true`: hereda la RLS de quien consulta.
 - Un trigger impide ascenderse a `fisio` editando el propio perfil.
@@ -258,6 +270,38 @@ el perfil tiene permisos de edición y contra qué proyecto de Supabase está co
 Ve **únicamente lo suyo**: próxima cita, estatus de su paquete con anillo de progreso, su
 rutina activa con imágenes/series/repeticiones y checklist diario, rutinas anteriores,
 promociones vigentes y sus boletos de sorteo con el historial de ganadores.
+
+### Autorregistro público y vitrina
+
+Cualquiera puede crear su cuenta desde la pantalla de acceso. Nace siempre con rol `paciente`
+(lo fija el servidor, no el cliente) y entra a una **vitrina comercial**: promociones vigentes,
+sorteos en curso, qué incluye el tratamiento y un botón para **solicitar su primera cita**.
+
+Al enviarla, el fisioterapeuta la ve en el dashboard y en *Solicitudes de cita*, desde donde
+puede contactarla, descartarla o pulsar **Crear expediente**.
+
+**Vinculación sin duplicados.** Si el correo del registro ya tenía expediente creado por el
+fisioterapeuta, la cuenta se enlaza con él en lugar de generar uno nuevo. Ocurre en dos sitios,
+ambos en el servidor:
+
+- El trigger `vincular_expediente_por_correo` actúa al confirmarse el correo y engancha el
+  expediente más antiguo que tenga esa dirección y siga sin cuenta.
+- La función `convertir_solicitud` repite la comprobación al crear el expediente desde el panel.
+
+En cuanto queda vinculado, la persona ve su historial, sus citas y sus ejercicios de siempre:
+la vitrina desaparece y el portal pasa a mostrar su expediente real.
+
+### Guardado manual, sin autoguardado
+
+Ni la valoración inicial ni el generador de rutinas guardan nada mientras escribes: todo vive
+en el formulario hasta que pulsas **Guardar**. Ese botón:
+
+- recoge **todos** los campos en una sola pasada — texto, número, deslizadores EVA, casillas,
+  desplegables, tablas de goniometría y fuerza, y pruebas especiales;
+- se bloquea mientras dura la petición para evitar envíos duplicados;
+- muestra el resultado bajo el propio botón: verde con el detalle si fue bien, o el **motivo real
+  del error** del servidor si falló, **sin salir de la pantalla** para no perder lo capturado;
+- avisa si intentas salir con cambios pendientes (al volver, al navegar y al cerrar la pestaña).
 
 ### La cascada que amarra todo
 

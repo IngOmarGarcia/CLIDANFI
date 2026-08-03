@@ -35,6 +35,55 @@
       <div class="flex min-h-[100dvh] flex-col justify-center px-6 py-10 anim-fade-up">
         ${marca()}
 
+        <!-- Entrar / Crear cuenta -->
+        <div class="mb-5 flex gap-1 rounded-2xl bg-ink-100 p-1" role="tablist">
+          <button type="button" role="tab" data-modo="entrar"
+            class="btn-modo flex-1 rounded-xl py-2.5 text-[13px] font-extrabold transition">Entrar</button>
+          <button type="button" role="tab" data-modo="registro"
+            class="btn-modo flex-1 rounded-xl py-2.5 text-[13px] font-extrabold transition">Crear cuenta</button>
+        </div>
+
+        <!-- ============================ REGISTRO ============================ -->
+        <form id="form-registro" novalidate class="hidden space-y-3.5" autocomplete="on">
+          <div>
+            <label for="reg-nombre" class="mb-1 block text-[12px] font-bold text-ink-700">Nombre completo</label>
+            <input id="reg-nombre" type="text" autocomplete="name" required
+                   placeholder="Nombre y apellidos" class="field !py-3" />
+          </div>
+          <div>
+            <label for="reg-email" class="mb-1 block text-[12px] font-bold text-ink-700">Correo electrónico</label>
+            <input id="reg-email" type="email" inputmode="email" autocomplete="email" required
+                   placeholder="tucorreo@ejemplo.com" class="field !py-3" />
+          </div>
+          <div>
+            <label for="reg-password" class="mb-1 block text-[12px] font-bold text-ink-700">Contraseña</label>
+            <input id="reg-password" type="password" autocomplete="new-password" required
+                   placeholder="Mínimo 6 caracteres" class="field !py-3" />
+          </div>
+          <div>
+            <label for="reg-password2" class="mb-1 block text-[12px] font-bold text-ink-700">Repite la contraseña</label>
+            <input id="reg-password2" type="password" autocomplete="new-password" required
+                   placeholder="••••••••" class="field !py-3" />
+          </div>
+
+          <p id="registro-error" role="alert" aria-live="polite"
+             class="hidden items-start gap-2 rounded-xl bg-brand-50 px-3 py-2.5 text-[12.5px] font-semibold leading-snug text-brand-800 ring-1 ring-brand-200"></p>
+
+          <button id="btn-registro" type="submit"
+            class="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-[15px] font-extrabold text-white shadow-card transition active:scale-[.98] disabled:opacity-60">
+            <span id="btn-registro-texto">Crear mi cuenta</span>
+          </button>
+
+          <div class="flex items-start gap-2 rounded-xl bg-ink-100 px-3 py-2.5">
+            ${icon('info', 'h-4 w-4 shrink-0 text-ink-500')}
+            <p class="text-[11.5px] leading-snug text-ink-600">
+              ¿Ya eres paciente de la clínica? Regístrate con <strong>el mismo correo</strong> que
+              diste en recepción y tu historial, tus citas y tus ejercicios se vincularán solos.
+            </p>
+          </div>
+        </form>
+
+        <!-- ============================= ACCESO ============================= -->
         <form id="form-login" novalidate class="space-y-3.5" autocomplete="on">
           <div>
             <label for="login-email" class="mb-1 block text-[12px] font-bold text-ink-700">Correo electrónico</label>
@@ -80,6 +129,69 @@
       const error = root.querySelector('#login-error');
       const boton = root.querySelector('#btn-login');
       const botonTexto = root.querySelector('#btn-login-texto');
+      const formRegistro = root.querySelector('#form-registro');
+
+      /* --- Conmutador Entrar / Crear cuenta --- */
+      const cambiarModo = (modo) => {
+        formRegistro.classList.toggle('hidden', modo !== 'registro');
+        form.classList.toggle('hidden', modo === 'registro');
+        root.querySelectorAll('.btn-modo').forEach((b) => {
+          const activo = b.dataset.modo === modo;
+          b.className = `btn-modo flex-1 rounded-xl py-2.5 text-[13px] font-extrabold transition ${
+            activo ? 'bg-white text-brand-700 shadow-sm' : 'text-ink-500'}`;
+          b.setAttribute('aria-selected', activo ? 'true' : 'false');
+        });
+        (modo === 'registro' ? root.querySelector('#reg-nombre') : email).focus();
+      };
+      root.querySelectorAll('.btn-modo').forEach((b) =>
+        b.addEventListener('click', () => cambiarModo(b.dataset.modo)));
+      cambiarModo('entrar');
+
+      /* --- Alta pública --- */
+      const errorReg = root.querySelector('#registro-error');
+      const botonReg = root.querySelector('#btn-registro');
+      const botonRegTexto = root.querySelector('#btn-registro-texto');
+
+      const mostrarErrorReg = (msg) => {
+        errorReg.innerHTML = `${icon('alert', 'h-4 w-4 shrink-0')}<span>${E(msg)}</span>`;
+        errorReg.classList.remove('hidden');
+        errorReg.classList.add('flex');
+      };
+
+      formRegistro.addEventListener('input', () => {
+        errorReg.classList.add('hidden');
+        errorReg.classList.remove('flex');
+      });
+
+      formRegistro.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const nombre = root.querySelector('#reg-nombre').value.trim();
+        const correo = root.querySelector('#reg-email').value.trim();
+        const p1 = root.querySelector('#reg-password').value;
+        const p2 = root.querySelector('#reg-password2').value;
+
+        if (!nombre) return mostrarErrorReg('Escribe tu nombre completo.');
+        if (!correo) return mostrarErrorReg('Escribe tu correo electrónico.');
+        if (p1.length < 6) return mostrarErrorReg('La contraseña debe tener al menos 6 caracteres.');
+        if (p1 !== p2) return mostrarErrorReg('Las contraseñas no coinciden.');
+
+        botonReg.disabled = true;
+        botonRegTexto.textContent = 'Creando cuenta…';
+        try {
+          const r = await API.auth.registrar(correo, p1, nombre);
+          if (r.necesitaConfirmar) {
+            root.innerHTML = confirmaTuCorreo(r.email);
+            return;
+          }
+          toast('¡Bienvenido a CLIDANFI!');
+          await App.entrar();
+        } catch (err) {
+          mostrarErrorReg(err.message || 'No se pudo crear la cuenta.');
+        } finally {
+          botonReg.disabled = false;
+          botonRegTexto.textContent = 'Crear mi cuenta';
+        }
+      });
 
       const mostrarError = (msg) => {
         error.innerHTML = `${icon('alert', 'h-4 w-4 shrink-0')}<span>${E(msg)}</span>`;
@@ -132,6 +244,30 @@
 
     return { titulo: 'Acceso', html, onMount, pantallaCompleta: true };
   }
+
+  /** Pantalla tras registrarse cuando Supabase exige confirmar el correo. */
+  const confirmaTuCorreo = (correo) => `
+    <div class="flex min-h-[100dvh] flex-col justify-center px-6 py-10 anim-fade-up">
+      ${marca()}
+      <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-center">
+        <div class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-600 text-white">
+          ${icon('bell', 'h-7 w-7')}
+        </div>
+        <h2 class="mt-3 text-[17px] font-extrabold text-emerald-900">Revisa tu correo</h2>
+        <p class="mt-1.5 text-[13px] leading-relaxed text-emerald-800">
+          Te enviamos un enlace de confirmación a<br />
+          <strong class="break-all">${E(correo)}</strong>
+        </p>
+        <p class="mt-3 text-[12px] leading-snug text-emerald-700">
+          Ábrelo para activar tu cuenta. Si ya eras paciente de la clínica, al confirmarlo
+          tu historial quedará vinculado automáticamente.
+        </p>
+      </div>
+      <button onclick="location.reload()"
+        class="mt-5 w-full rounded-2xl bg-ink-900 py-3.5 text-[14.5px] font-extrabold text-white active:scale-[.98]">
+        Volver al inicio
+      </button>
+    </div>`;
 
   /* ======================================================================
      2 · CONFIGURACIÓN REQUERIDA

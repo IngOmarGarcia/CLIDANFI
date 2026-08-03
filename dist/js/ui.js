@@ -294,6 +294,68 @@
       });
     });
 
+  /* ------------------------------------------------- Guardado explícito ---- */
+
+  /**
+   * Ejecuta un guardado mostrando su estado en el propio botón y en un aviso
+   * bajo él. Nada se persiste hasta que el usuario pulsa: no hay autoguardado.
+   *
+   * - Bloquea el botón mientras dura la petición (evita el doble envío).
+   * - Éxito → botón verde + mensaje, y `alTerminar()` si se pasó.
+   * - Error → botón restaurado + motivo real del servidor, SIN salir de la
+   *   pantalla, para que no se pierda lo capturado.
+   *
+   * @param {HTMLElement} boton
+   * @param {() => Promise<any>} tarea
+   */
+  const guardarConEstado = async (boton, tarea, { textoOk = 'Guardado', alTerminar = null } = {}) => {
+    if (!boton || boton.dataset.guardando === '1') return;
+
+    const htmlOriginal = boton.innerHTML;
+    const claseOriginal = boton.className;
+    const aviso = document.getElementById('aviso-guardado');
+
+    const pintarAviso = (tipo, texto) => {
+      if (!aviso) return;
+      const estilos = {
+        ok:    'border-emerald-200 bg-emerald-50 text-emerald-800',
+        error: 'border-rose-200 bg-rose-50 text-rose-800'
+      };
+      aviso.className = `mt-2 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-[12.5px] font-semibold leading-snug ${estilos[tipo]}`;
+      aviso.innerHTML = `${icon(tipo === 'ok' ? 'check' : 'alert', 'h-4 w-4 shrink-0')}<span>${escapeHtml(texto)}</span>`;
+      aviso.classList.remove('hidden');
+    };
+
+    boton.dataset.guardando = '1';
+    boton.disabled = true;
+    boton.className = claseOriginal + ' opacity-70';
+    boton.innerHTML = `${icon('refresh', 'h-4.5 w-4.5 animate-spin')} Guardando…`;
+    if (aviso) aviso.classList.add('hidden');
+
+    try {
+      const resultado = await tarea();
+      boton.className = claseOriginal.replace(/bg-\w+-\d+/, 'bg-emerald-600');
+      boton.innerHTML = `${icon('check', 'h-4.5 w-4.5')} ${escapeHtml(textoOk)}`;
+      pintarAviso('ok', `${textoOk} correctamente.`);
+      toast(textoOk);
+      if (alTerminar) setTimeout(() => alTerminar(resultado), 600);
+      return resultado;
+    } catch (e) {
+      console.error('[CLIDANFI] Error al guardar:', e);
+      boton.className = claseOriginal;
+      boton.innerHTML = htmlOriginal;
+      pintarAviso('error', e.message || 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.');
+      toast('No se pudo guardar', 'error', 4000);
+      throw e;
+    } finally {
+      boton.dataset.guardando = '0';
+      boton.disabled = false;
+    }
+  };
+
+  /** Contenedor donde `guardarConEstado` escribe el resultado. */
+  const avisoGuardado = () => `<p id="aviso-guardado" role="status" aria-live="polite" class="hidden"></p>`;
+
   /* -------------------------------------------------- Bloques reutilizables */
   const avatar = (name, cls = 'h-11 w-11 text-[13px]') => `
     <div class="grid ${cls} shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-brand-200 font-extrabold text-brand-800 ring-1 ring-white">
@@ -333,6 +395,7 @@
     fmtTime, fmtDate, fmtDateLong, fmtDateTime, relDay, fmtMoney, fmtMoneyShort,
     icon, ICONS, placeholderImage, readImageCompressed,
     toast, openSheet, closeSheet, confirmSheet,
+    guardarConEstado, avisoGuardado,
     avatar, badge, emptyState, sectionTitle,
     DIAS, DIAS_S, MESES, MESES_S
   };

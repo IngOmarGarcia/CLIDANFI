@@ -520,9 +520,10 @@ drop policy if exists todos_ven_sorteos on sorteos;
 create policy todos_ven_sorteos on sorteos for select to authenticated using (publicado);
 
 -- NOTA IMPORTANTE
--- Ningún rol 'paciente' tiene políticas de INSERT/UPDATE/DELETE en ninguna
--- tabla: solo puede leer. Cualquier escritura desde su sesión es rechazada
--- por el servidor aunque se manipule el JavaScript del navegador.
+-- El rol 'paciente' solo tiene permisos de LECTURA en todo el expediente
+-- clínico. Su única escritura permitida es crear solicitudes de cita
+-- (tabla `solicitudes_cita`, sección 16). Cualquier otra escritura desde su
+-- sesión es rechazada por el servidor aunque se manipule el JavaScript.
 
 -- ============================================================================
 -- 14 · STORAGE (fotos de pruebas y de ejercicios)
@@ -578,6 +579,142 @@ insert into ejercicios (id, nombre, categoria, descripcion, cue, sets, reps, hol
 on conflict (id) do update set
   nombre = excluded.nombre, categoria = excluded.categoria,
   descripcion = excluded.descripcion, cue = excluded.cue;
+
+-- ============================================================================
+-- 16 · AUTORREGISTRO PÚBLICO
+--
+--     Cualquier persona puede crear su cuenta desde la pantalla de acceso.
+--     Nace siempre como 'paciente' (trigger handle_new_user, sección 1).
+--
+--     Si el correo ya existía en `pacientes` porque el fisioterapeuta la dio
+--     de alta antes, su cuenta nueva se VINCULA al expediente existente en
+--     lugar de crear un duplicado.
+-- ============================================================================
+
+-- Búsqueda por correo sin distinguir mayúsculas
+create index if not exists idx_pacientes_email_lower on pacientes (lower(email));
+
+/* ----------------------------------------------------------------------------
+   ⚠ SEGURIDAD — LEER ANTES DE DESPLEGAR
+
+   Vincular por correo significa que quien controle una dirección accede al
+   expediente asociado a ella. Por eso este trigger SOLO actúa cuando el correo
+   está confirmado (`email_confirmed_at is not null`).
+
+   En Supabase → Authentication → Providers → Email, la opción
+   «Confirm email» DEBE quedar ACTIVADA. Si la desactivas, cualquiera podría
+   reclamar la historia clínica de otra persona con solo escribir su correo.
+   ---------------------------------------------------------------------------- */
+create or replace function vincular_expediente_por_correo()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_paciente uuid;
+begin
+  if new.email_confirmed_at is null or new.email is null then
+    return new;
+  end if;
+
+  -- Un solo expediente: el más antiguo sin cuenta con ese correo.
+  -- (pacientes.usuario_id es UNIQUE, así que nunca se vinculan dos.)
+  select id into v_paciente
+    from pacientes
+   where usuario_id is null
+     and lower(email) = lower(new.email)
+   order by creado_en
+   limit 1;
+
+  if v_paciente is not null then
+    update pacientes set usuario_id = new.id where id = v_paciente;
+    raise notice 'Expediente % vinculado a la cuenta %', v_paciente, new.id;
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists trg_vincular_expediente on auth.users;
+create trigger trg_vincular_expediente
+  after insert or update of email_confirmed_at on auth.users
+  for each row execute function vincular_expediente_por_correo();
+
+-- ============================================================================
+-- 17 · SOLICITUDES DE CITA
+--     Lo que envía quien se registra por su cuenta y todavía no tiene
+--     expediente. Es la ÚNICA tabla donde un paciente puede escribir.
+-- ============================================================================
+create table if not exists solicitudes_cita (
+  id            uuid primary key default gen_random_uuid(),
+  usuario_id    uuid not null references auth.users(id) on delete cascade,
+  nombre        text not null,
+  telefono      text default '',
+  email         text default '',
+  motivo        text default '',
+  preferencia   text default '',
+  estado        text not null default 'nueva'
+                check (estado in ('nueva', 'contactada', 'agendada', 'descartada')),
+  nota_interna  text default '',
+  paciente_id   uuid references pacientes(id) on delete set null,
+  creado_en     timestamptz not null default now()
+);
+
+create index if not exists idx_solicitudes_estado on solicitudes_cita(estado, creado_en desc);
+create index if not exists idx_solicitudes_usuario on solicitudes_cita(usuario_id);
+
+alter table solicitudes_cita enable row level security;
+
+drop policy if exists fisio_total on solicitudes_cita;
+create policy fisio_total on solicitudes_cita for all to authenticated
+  using (es_fisio()) with check (es_fisio());
+
+drop policy if exists pac_ve_sus_solicitudes on solicitudes_cita;
+create policy pac_ve_sus_solicitudes on solicitudes_cita for select to authenticated
+  using (usuario_id = auth.uid());
+
+-- Única escritura permitida al paciente, y solo a su propio nombre.
+drop policy if exists pac_crea_solicitud on solicitudes_cita;
+create policy pac_crea_solicitud on solicitudes_cita for insert to authenticated
+  with check (usuario_id = auth.uid() and estado = 'nueva');
+
+/* ----------------------------------------------------------------------------
+   Convierte una solicitud en expediente. Solo el fisioterapeuta.
+   Si el correo ya tenía expediente sin cuenta, lo reutiliza en vez de duplicar.
+   ---------------------------------------------------------------------------- */
+create or replace function convertir_solicitud(p_solicitud uuid)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare s solicitudes_cita%rowtype; v_paciente uuid;
+begin
+  if not es_fisio() then raise exception 'Solo el fisioterapeuta puede convertir solicitudes'; end if;
+
+  select * into s from solicitudes_cita where id = p_solicitud;
+  if not found then raise exception 'Solicitud no encontrada'; end if;
+
+  -- ¿ya tiene expediente esa cuenta?
+  select id into v_paciente from pacientes where usuario_id = s.usuario_id limit 1;
+
+  -- ¿o hay uno con su correo, todavía sin cuenta?
+  if v_paciente is null and coalesce(s.email, '') <> '' then
+    select id into v_paciente
+      from pacientes
+     where usuario_id is null and lower(email) = lower(s.email)
+     order by creado_en limit 1;
+
+    if v_paciente is not null then
+      update pacientes set usuario_id = s.usuario_id where id = v_paciente;
+    end if;
+  end if;
+
+  -- si no existía, se crea
+  if v_paciente is null then
+    insert into pacientes (usuario_id, nombre, telefono, email, diagnostico)
+    values (s.usuario_id, s.nombre, s.telefono, s.email, s.motivo)
+    returning id into v_paciente;
+  end if;
+
+  update solicitudes_cita
+     set estado = 'agendada', paciente_id = v_paciente
+   where id = p_solicitud;
+
+  return v_paciente;
+end $$;
 
 -- ============================================================================
 -- LISTO. Siguiente paso: supabase/seed.sql

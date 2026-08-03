@@ -81,13 +81,38 @@
       return _recordarSesion(s);
     },
 
+    /**
+     * Alta pública. La cuenta nace SIEMPRE como 'paciente' (lo fija el trigger
+     * handle_new_user en el servidor: el cliente no elige rol).
+     *
+     * Si el correo ya tenía expediente creado por el fisioterapeuta, el trigger
+     * `vincular_expediente_por_correo` lo enlaza en cuanto se confirma el
+     * correo, sin duplicar la historia clínica.
+     *
+     * @returns {{necesitaConfirmar: boolean, email: string}}
+     */
     registrar: async (email, password, nombre) => {
+      const correo = String(email || '').trim().toLowerCase();
       const { data, error } = await sb.auth.signUp({
-        email: String(email || '').trim().toLowerCase(), password,
-        options: { data: { nombre } }
+        email: correo,
+        password,
+        options: { data: { nombre: String(nombre || '').trim() }, emailRedirectTo: location.origin + location.pathname }
       });
-      if (error) throw new Error(error.message);
-      return data;
+
+      if (error) {
+        if (/already registered|already exists/i.test(error.message)) {
+          throw new Error('Ese correo ya tiene una cuenta. Inicia sesión o recupera tu contraseña.');
+        }
+        if (/password/i.test(error.message)) {
+          throw new Error('La contraseña debe tener al menos 6 caracteres.');
+        }
+        throw new Error(error.message);
+      }
+
+      // Sin sesión inmediata ⇒ Supabase exige confirmar el correo.
+      const necesitaConfirmar = !data.session;
+      if (!necesitaConfirmar) await _recordarSesion(await _normalizar(data.session));
+      return { necesitaConfirmar, email: correo };
     },
 
     recuperar: async (email) => {
@@ -506,13 +531,73 @@
   };
 
   /* ======================================================================
+     VITRINA COMERCIAL
+     Lo que ve quien se registró por su cuenta y todavía no tiene expediente.
+     No expone conteos de boletos: un paciente solo puede leer los suyos por
+     RLS, así que cualquier total que calculara aquí sería engañoso.
+     ====================================================================== */
+  const sorteosVitrina = async () => {
+    const now = new Date();
+    const rows = ok(await sb.from('sorteos').select('*')
+      .eq('publicado', true).order('termina_en', { ascending: false }));
+
+    return rows.map((s) => ({
+      ...s,
+      vigente: s.estado === 'activo' && new Date(s.inicia_en) <= now && new Date(s.termina_en) >= now,
+      dias_restantes: Math.max(0, Math.ceil((new Date(s.termina_en) - now) / 86400000))
+    })).sort((a, b) => Number(b.vigente) - Number(a.vigente));
+  };
+
+  /* ======================================================================
+     SOLICITUDES DE CITA
+     Única escritura permitida al rol paciente (política `pac_crea_solicitud`).
+     ====================================================================== */
+  const crearSolicitudCita = async ({ nombre, telefono = '', motivo = '', preferencia = '' }) => {
+    const u = (await sb.auth.getUser()).data.user;
+    if (!u) throw new Error('Sesión no iniciada.');
+    if (!String(nombre || '').trim()) throw new Error('Escribe tu nombre completo.');
+
+    return ok(await sb.from('solicitudes_cita').insert({
+      usuario_id: u.id,               // la política RLS exige que sea el propio
+      nombre: String(nombre).trim(),
+      telefono: String(telefono).trim(),
+      email: u.email,
+      motivo: String(motivo).trim(),
+      preferencia: String(preferencia).trim(),
+      estado: 'nueva'
+    }).select().single());
+  };
+
+  /** Solicitudes de la sesión actual (RLS las limita a las propias). */
+  const misSolicitudes = async () =>
+    ok(await sb.from('solicitudes_cita').select('*').order('creado_en', { ascending: false }));
+
+  const listarSolicitudes = async ({ estado = null } = {}) => {
+    let q = sb.from('solicitudes_cita').select('*').order('creado_en', { ascending: false });
+    if (estado) q = q.eq('estado', estado);
+    return ok(await q);
+  };
+
+  const actualizarSolicitud = async (id, patch) =>
+    ok(await sb.from('solicitudes_cita').update(patch).eq('id', id).select().single());
+
+  /**
+   * Convierte una solicitud en expediente. Lo resuelve la función
+   * `convertir_solicitud` en el servidor, que reutiliza el expediente si ya
+   * existía uno con ese correo en vez de duplicarlo.
+   * @returns {string} id del paciente
+   */
+  const convertirSolicitud = async (id) =>
+    ok(await sb.rpc('convertir_solicitud', { p_solicitud: id }));
+
+  /* ======================================================================
      DASHBOARD
      ====================================================================== */
   const resumenDashboard = async () => {
     const hoy = isoDay(new Date());
     const semanaIni = startOfWeek(new Date()).toISOString();
 
-    const [ingresos, citasHoy, atendidosHoy, atendidosSemana, pacientesActivos, sorteosActivos, promos, pagosSemana] =
+    const [ingresos, citasHoy, atendidosHoy, atendidosSemana, pacientesActivos, sorteosActivos, promos, pagosSemana, solicitudes] =
       await Promise.all([
         ingresosSemana(),
         citasDeHoy(),
@@ -522,7 +607,8 @@
         sb.from('pacientes').select('*', { count: 'exact', head: true }).eq('activo', true),
         sb.from('sorteos').select('*', { count: 'exact', head: true }).eq('estado', 'activo'),
         listarPromociones({ soloVigentes: true }),
-        sb.from('pagos').select('monto').gte('pagado_en', semanaIni).then(ok)
+        sb.from('pagos').select('monto').gte('pagado_en', semanaIni).then(ok),
+        sb.from('solicitudes_cita').select('*', { count: 'exact', head: true }).eq('estado', 'nueva')
       ]);
 
     return {
@@ -535,6 +621,7 @@
       pacientes_activos: pacientesActivos.count || 0,
       sorteos_activos: sorteosActivos.count || 0,
       promos_vigentes: promos.length,
+      solicitudes_nuevas: solicitudes.count || 0,
       ticket_promedio: pagosSemana.length
         ? Math.round(pagosSemana.reduce((s, p) => s + Number(p.monto), 0) / pagosSemana.length) : 0
     };
@@ -562,6 +649,7 @@
     'guardarPromocion', 'eliminarPromocion',
     'listarSorteos', 'obtenerSorteo', 'guardarSorteo', 'eliminarSorteo',
     'sincronizarBoletos', 'participantesDeSorteo', 'realizarSorteo', 'publicarGanador',
+    'listarSolicitudes', 'actualizarSolicitud', 'convertirSolicitud',
     'resumenDashboard'
   ];
 
@@ -574,7 +662,9 @@
     rutinasDePaciente: 0, rutinaActiva: 0, misBoletos: 0
   };
 
-  // Abiertas a cualquier sesión: getConfig, setConfig, listarPromociones, miPaciente
+  // Abiertas a cualquier sesión (la RLS ya las acota por sí sola):
+  //   getConfig · setConfig · listarPromociones · miPaciente
+  //   sorteosVitrina · crearSolicitudCita · misSolicitudes
 
   async function _autorizar(nombre, args) {
     if (!_sesion) await auth.sesion();          // primera llamada tras recargar
@@ -621,6 +711,8 @@
     listarPromociones, guardarPromocion, eliminarPromocion,
     listarSorteos, obtenerSorteo, guardarSorteo, eliminarSorteo,
     sincronizarBoletos, participantesDeSorteo, realizarSorteo, publicarGanador, misBoletos,
+    sorteosVitrina, crearSolicitudCita, misSolicitudes,
+    listarSolicitudes, actualizarSolicitud, convertirSolicitud,
     resumenDashboard
   }), {
     // Fuera del guardia: deben funcionar SIN sesión previa.

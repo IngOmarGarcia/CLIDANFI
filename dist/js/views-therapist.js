@@ -32,6 +32,50 @@
       </button>
     </div>`;
 
+  /* ======================================================================
+     ESTADO DE EDICIÓN
+     No hay autoguardado: lo capturado vive en el formulario hasta que el
+     usuario pulsa «Guardar». Este bloque solo sirve para avisarle si intenta
+     salir con cambios pendientes.
+     ====================================================================== */
+  let _sucio = false;
+  const marcarSucio = () => { _sucio = true; pintarPendiente(true); };
+  const marcarLimpio = () => { _sucio = false; pintarPendiente(false); };
+  const hayCambiosSinGuardar = () => _sucio;
+
+  /** Indicador «sin guardar» junto al botón. */
+  function pintarPendiente(visible) {
+    const el = document.getElementById('indicador-pendiente');
+    if (el) el.classList.toggle('hidden', !visible);
+  }
+
+  /** Cualquier edición en el formulario marca cambios pendientes. */
+  function vigilarCambios(root) {
+    ['input', 'change'].forEach((ev) =>
+      root.addEventListener(ev, (e) => {
+        if (e.target.closest('[data-no-vigilar]')) return;
+        marcarSucio();
+      }, true));
+  }
+
+  /** Barra inferior de guardado, común a valoración y rutinas. */
+  const barraGuardar = (accion, datos, texto) => `
+    <div class="fixed bottom-0 left-1/2 z-20 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 backdrop-blur nav-safe">
+      <p id="indicador-pendiente" class="mb-1.5 hidden items-center justify-center gap-1.5 text-[11.5px] font-bold text-amber-700">
+        ${icon('alert', 'h-3.5 w-3.5')} Tienes cambios sin guardar
+      </p>
+      <button ${datos} data-action="${accion}"
+        class="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-[14.5px] font-extrabold text-white shadow-card transition active:scale-[.98]">
+        ${icon('save', 'h-4.5 w-4.5')} ${E(texto)}
+      </button>
+      ${UI.avisoGuardado()}
+    </div>`;
+
+  /* Rutina en edición. Antes vivía en `window.__rutinaSeleccion`, un global
+     que cualquier script podía pisar; ahora es estado del módulo. */
+  let _rutinaEnEdicion = null;
+  const rutinaEnEdicion = () => _rutinaEnEdicion;
+
   const ESTADO_CITA = {
     agendada:   ['brand', 'Agendada'],
     completada: ['green', 'Atendida'],
@@ -125,6 +169,22 @@
 
     const html = `
       <div class="space-y-4 px-4 pt-4 anim-fade-up">
+
+        ${r.solicitudes_nuevas ? `
+          <button data-action="ver-solicitudes"
+            class="flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-3.5 text-left shadow-card active:scale-[.99]">
+            <span class="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-600 text-white">
+              ${icon('bell', 'h-5 w-5')}
+              <span class="absolute -right-1 -top-1 grid h-5 min-w-[1.25rem] place-items-center rounded-full bg-ink-900 px-1 text-[10px] font-extrabold text-white">${r.solicitudes_nuevas}</span>
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-[13.5px] font-extrabold text-brand-900">
+                ${r.solicitudes_nuevas} solicitud${r.solicitudes_nuevas === 1 ? '' : 'es'} de cita
+              </span>
+              <span class="block text-[11.5px] font-semibold text-brand-700">Pacientes nuevos esperando respuesta</span>
+            </span>
+            ${icon('chevronR', 'h-4 w-4 shrink-0 text-brand-400')}
+          </button>` : ''}
 
         <!-- Saludo -->
         <div class="px-1">
@@ -779,14 +839,11 @@
         ${secciones}
       </div>
 
-      <div class="fixed bottom-0 left-1/2 z-20 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 backdrop-blur nav-safe">
-        <button data-action="guardar-valoracion" data-id="${p.id}" data-vid="${v ? v.id : ''}"
-          class="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-[14.5px] font-extrabold text-white shadow-card active:scale-[.98]">
-          ${icon('save', 'h-4.5 w-4.5')} Guardar valoración
-        </button>
-      </div>`;
+      ${barraGuardar('guardar-valoracion', `data-id="${p.id}" data-vid="${v ? v.id : ''}"`, 'Guardar valoración')}`;
 
     const onMount = (root) => {
+      marcarLimpio();
+      vigilarCambios(root);
       // Activar / desactivar secciones
       root.querySelectorAll('[data-toggle-sec]').forEach((chk) => {
         chk.addEventListener('change', () => {
@@ -923,7 +980,7 @@
           </div>
           <div class="relative mb-2.5">
             <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">${icon('search', 'h-4 w-4')}</span>
-            <input id="ex-buscar" type="search" placeholder="Buscar ejercicio…" class="field !pl-10 !py-2.5" />
+            <input id="ex-buscar" type="search" data-no-vigilar placeholder="Buscar ejercicio…" class="field !pl-10 !py-2.5" />
           </div>
           <div id="catalogo" class="scroll-x no-scrollbar pb-1">
             ${Store.CATALOGO_EJERCICIOS.map(tarjetaCatalogo).join('')}
@@ -937,14 +994,11 @@
         </div>
       </div>
 
-      <div class="fixed bottom-0 left-1/2 z-20 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 backdrop-blur nav-safe">
-        <button data-action="guardar-rutina" data-id="${p.id}" data-rid="${base ? base.id : ''}"
-          class="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-[14.5px] font-extrabold text-white shadow-card active:scale-[.98]">
-          ${icon('save', 'h-4.5 w-4.5')} Guardar y activar rutina
-        </button>
-      </div>`;
+      ${barraGuardar('guardar-rutina', `data-id="${p.id}" data-rid="${base ? base.id : ''}"`, 'Guardar y activar rutina')}`;
 
     const onMount = (root) => {
+      marcarLimpio();
+      vigilarCambios(root);
       const cont = root.querySelector('#seleccionados');
       const conteo = root.querySelector('#conteo-sel');
       const catalogo = root.querySelector('#catalogo');
@@ -1007,6 +1061,7 @@
           const ex = Store.ejercicio(exId);
           seleccion.push({ ejercicio_id: exId, series: ex.sets, reps: ex.reps, hold: ex.hold, frecuencia: 'Diario', nota: '' });
         }
+        marcarSucio();
         pintar();
       });
 
@@ -1023,12 +1078,13 @@
       });
       cont.addEventListener('click', (e) => {
         const quitar = e.target.closest('[data-quitar]');
-        if (quitar) { seleccion.splice(Number(quitar.dataset.quitar), 1); return pintar(); }
+        if (quitar) { seleccion.splice(Number(quitar.dataset.quitar), 1); marcarSucio(); return pintar(); }
         const mover = e.target.closest('[data-move]');
         if (mover) {
           const i = Number(mover.dataset.idx), j = i + Number(mover.dataset.move);
           if (j < 0 || j >= seleccion.length) return;
           [seleccion[i], seleccion[j]] = [seleccion[j], seleccion[i]];
+          marcarSucio();
           pintar();
         }
       });
@@ -1055,8 +1111,10 @@
       root.querySelector('#ex-buscar').addEventListener('input', (e) => { q = e.target.value; filtrar(); });
 
       pintar();
-      // Expone la selección para el handler de guardado
-      global.__rutinaSeleccion = seleccion;
+      marcarLimpio();   // pintar() disparó eventos: el punto de partida está limpio
+
+      // Estado que leerá el botón de guardar (ya no un global suelto)
+      _rutinaEnEdicion = { pacienteId: p.id, rutinaId: base ? base.id : null, items: seleccion };
     };
 
     return { titulo: base ? 'Editar rutina' : 'Nueva rutina', html, onMount, volver: `#/t/paciente/${p.id}?tab=rutinas` };
@@ -1667,6 +1725,113 @@
     });
   }
 
+  /* --- Solicitudes de cita (autorregistro) ------------------------------ */
+  const ESTADO_SOLICITUD = {
+    nueva:      ['brand', 'Nueva'],
+    contactada: ['amber', 'Contactada'],
+    agendada:   ['green', 'Convertida'],
+    descartada: ['ink', 'Descartada']
+  };
+
+  async function sheetSolicitudes() {
+    const list = await API.listarSolicitudes();
+    const pendientes = list.filter((s) => s.estado === 'nueva' || s.estado === 'contactada');
+    const cerradas = list.filter((s) => s.estado === 'agendada' || s.estado === 'descartada');
+
+    const tarjeta = (s) => {
+      const [tono, etiqueta] = ESTADO_SOLICITUD[s.estado] || ESTADO_SOLICITUD.nueva;
+      const abierta = s.estado === 'nueva' || s.estado === 'contactada';
+      return `
+        <article class="rounded-2xl border ${s.estado === 'nueva' ? 'border-brand-200 bg-brand-50/40' : 'border-ink-200 bg-white'} p-3">
+          <div class="flex items-start gap-3">
+            ${avatar(s.nombre, 'h-10 w-10 text-[12px]')}
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <p class="truncate text-[13.5px] font-extrabold text-ink-900">${E(s.nombre)}</p>
+                ${badge(etiqueta, tono)}
+              </div>
+              <p class="truncate text-[11.5px] text-ink-500">${E(s.email || '—')}</p>
+              ${s.telefono ? `<a href="tel:${E(s.telefono.replace(/\s/g, ''))}"
+                class="mt-0.5 inline-flex items-center gap-1 text-[12px] font-bold text-brand-700">
+                ${icon('phone', 'h-3.5 w-3.5')} ${E(s.telefono)}</a>` : ''}
+            </div>
+            <span class="shrink-0 text-[10.5px] font-bold text-ink-400">${E(relDay(s.creado_en))}</span>
+          </div>
+
+          ${s.motivo ? `<p class="mt-2 rounded-lg bg-ink-50 px-2.5 py-1.5 text-[12px] leading-snug text-ink-700">${E(s.motivo)}</p>` : ''}
+          ${s.preferencia ? `<p class="mt-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold text-ink-500">
+            ${icon('clock', 'h-3.5 w-3.5')} Prefiere: ${E(s.preferencia)}</p>` : ''}
+
+          ${abierta ? `
+            <div class="mt-2.5 flex flex-wrap gap-1.5">
+              <button data-sol-convertir="${s.id}"
+                class="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-600 py-2 text-[12px] font-bold text-white active:scale-95">
+                ${icon('users', 'h-3.5 w-3.5')} Crear expediente
+              </button>
+              ${s.estado === 'nueva' ? `<button data-sol-estado="${s.id}" data-valor="contactada"
+                class="rounded-xl bg-amber-100 px-3 py-2 text-[12px] font-bold text-amber-800 active:scale-95">Contactada</button>` : ''}
+              <button data-sol-estado="${s.id}" data-valor="descartada"
+                class="rounded-xl bg-ink-100 px-3 py-2 text-[12px] font-bold text-ink-600 active:scale-95">Descartar</button>
+            </div>` : ''}
+
+          ${s.estado === 'agendada' && s.paciente_id ? `
+            <a href="#/t/paciente/${s.paciente_id}" data-cerrar-sheet
+              class="mt-2.5 flex items-center justify-center gap-1.5 rounded-xl bg-ink-100 py-2 text-[12px] font-bold text-ink-700">
+              ${icon('user', 'h-3.5 w-3.5')} Abrir expediente
+            </a>` : ''}
+        </article>`;
+    };
+
+    openSheet({
+      title: 'Solicitudes de cita',
+      subtitle: `${pendientes.length} pendiente${pendientes.length === 1 ? '' : 's'} · ${list.length} en total`,
+      size: 'tall',
+      body: `
+        <div class="mb-3 rounded-xl bg-brand-50 p-3 ring-1 ring-brand-200">
+          <p class="text-[11px] font-extrabold uppercase tracking-wide text-brand-700">Autorregistro</p>
+          <p class="mt-1 text-[12px] font-semibold leading-snug text-brand-900">
+            Personas que crearon su cuenta desde la app y piden su primera cita.
+            «Crear expediente» reutiliza el que ya exista con ese correo en vez de duplicarlo.
+          </p>
+        </div>
+
+        ${pendientes.length ? `<div class="space-y-2">${pendientes.map(tarjeta).join('')}</div>`
+          : emptyState('bell', 'Sin solicitudes pendientes', 'Aquí aparecerán los registros nuevos que pidan cita.')}
+
+        ${cerradas.length ? `
+          <div class="mt-4">
+            ${sectionTitle('Atendidas')}
+            <div class="space-y-2 opacity-75">${cerradas.map(tarjeta).join('')}</div>
+          </div>` : ''}`,
+      onMount: (root) => {
+        root.querySelectorAll('[data-cerrar-sheet]').forEach((a) =>
+          a.addEventListener('click', () => closeSheet()));
+
+        root.querySelectorAll('[data-sol-estado]').forEach((b) => b.addEventListener('click', async () => {
+          await API.actualizarSolicitud(b.dataset.solEstado, { estado: b.dataset.valor });
+          toast('Solicitud actualizada');
+          closeSheet();
+          sheetSolicitudes();
+        }));
+
+        root.querySelectorAll('[data-sol-convertir]').forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          b.innerHTML = `${icon('refresh', 'h-3.5 w-3.5 animate-spin')} Creando…`;
+          try {
+            const pacienteId = await API.convertirSolicitud(b.dataset.solConvertir);
+            closeSheet();
+            toast('Expediente listo');
+            location.hash = `#/t/paciente/${pacienteId}`;
+          } catch (e) {
+            b.disabled = false;
+            b.innerHTML = `${icon('users', 'h-3.5 w-3.5')} Crear expediente`;
+            toast(e.message || 'No se pudo crear el expediente', 'error', 4000);
+          }
+        }));
+      }
+    });
+  }
+
   /* --- Promociones ----------------------------------------------------- */
   async function sheetPromos() {
     const list = await API.listarPromociones();
@@ -1753,8 +1918,9 @@
      ====================================================================== */
   global.VistaFisio = {
     dashboard, agenda, pacientes, paciente, valoracion, rutinaEditor, sorteos,
-    leerValoracion,
+    leerValoracion, rutinaEnEdicion, hayCambiosSinGuardar, marcarLimpio,
     sheetPaciente, sheetCita, sheetMenuCita, sheetAsistencia, sheetNota, sheetFoto,
-    sheetSorteo, sheetParticipantes, ejecutarSorteo, sheetPromos, sheetPromoForm
+    sheetSorteo, sheetParticipantes, ejecutarSorteo, sheetPromos, sheetPromoForm,
+    sheetSolicitudes
   };
 })(window);
