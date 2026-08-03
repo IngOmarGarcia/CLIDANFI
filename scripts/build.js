@@ -16,6 +16,9 @@ const DIST = path.join(RAIZ, 'dist');
 
 const log = (m) => console.log(`[CLIDANFI] ${m}`);
 
+/* --- 0 · el cliente y el esquema deben hablar el mismo idioma ------------- */
+execFileSync(process.execPath, [path.join(__dirname, 'check-schema.js')], { stdio: 'inherit' });
+
 /* --- 1 · variables de entorno + cliente de Supabase ----------------------- */
 execFileSync(process.execPath, [path.join(__dirname, 'generate-env.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.join(__dirname, 'vendor.js')], { stdio: 'inherit' });

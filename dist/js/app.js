@@ -19,8 +19,10 @@
     { patron: /^\/t\/agenda$/,               vista: () => VistaFisio.agenda,       rol: 'fisio' },
     { patron: /^\/t\/pacientes$/,            vista: () => VistaFisio.pacientes,    rol: 'fisio' },
     { patron: /^\/t\/paciente\/([^/?]+)$/,   vista: () => VistaFisio.paciente,     rol: 'fisio', claves: ['id'] },
-    { patron: /^\/t\/valoracion\/([^/?]+)$/, vista: () => VistaFisio.valoracion,   rol: 'fisio', claves: ['id'] },
-    { patron: /^\/t\/rutina\/([^/?]+)$/,     vista: () => VistaFisio.rutinaEditor, rol: 'fisio', claves: ['id'] },
+    // `sinNav`: pantallas de formulario a pantalla completa. Se oculta el menú
+    // inferior para que no tape la barra de guardar; se sale con «volver».
+    { patron: /^\/t\/valoracion\/([^/?]+)$/, vista: () => VistaFisio.valoracion,   rol: 'fisio', claves: ['id'], sinNav: true },
+    { patron: /^\/t\/rutina\/([^/?]+)$/,     vista: () => VistaFisio.rutinaEditor, rol: 'fisio', claves: ['id'], sinNav: true },
     { patron: /^\/t\/sorteos$/,              vista: () => VistaFisio.sorteos,      rol: 'fisio' },
     // Paciente
     { patron: /^\/p\/inicio$/,               vista: () => VistaPaciente.inicio,      rol: 'paciente' },
@@ -136,12 +138,13 @@
 
       const resultado = await ruta.def.vista()(ruta.params, ruta.query);
 
-      mostrarChrome(true);
+      const conNav = !ruta.def.sinNav;
+      mostrarChrome(true, conNav);
       root.innerHTML = resultado.html;
       irArriba(root);
 
       pintarBarraContexto(resultado);
-      pintarNav();
+      if (conNav) pintarNav();
       pintarUsuario();
 
       if (resultado.onMount) resultado.onMount(root);
@@ -199,11 +202,17 @@
       </div>`;
   }
 
-  /** Muestra u oculta cabecera y navegación (la pantalla de acceso va limpia). */
-  function mostrarChrome(visible) {
+  /**
+   * Muestra u oculta cabecera y navegación.
+   * La pantalla de acceso va limpia; las de formulario conservan la cabecera
+   * pero ocultan el menú inferior para no tapar la barra de guardar.
+   */
+  function mostrarChrome(visible, conNav = true) {
     document.getElementById('app-header').classList.toggle('hidden', !visible);
-    document.getElementById('bottom-nav').classList.toggle('hidden', !visible);
-    document.getElementById('view-root').classList.toggle('pb-28', visible);
+    document.getElementById('bottom-nav').classList.toggle('hidden', !visible || !conNav);
+    // El hueco de pb-28 solo hace falta si el menú está a la vista; en las
+    // pantallas de formulario el espacio lo reserva la propia vista.
+    document.getElementById('view-root').classList.toggle('pb-28', visible && conNav);
   }
 
   function pintarBarraContexto(resultado) {

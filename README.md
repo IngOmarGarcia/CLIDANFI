@@ -231,6 +231,7 @@ CLIDANFI/
 │   ├── views-patient.js       Vista paciente
 │   └── app.js                 Router + guardia de sesión
 ├── scripts/
+│   ├── check-schema.js        Cruza js/api.js con schema.sql (caza los 404)
 │   ├── generate-env.js        Variables de entorno → js/env.js (con validación)
 │   ├── vendor.js              Copia el cliente de Supabase
 │   └── build.js               Build completo → dist/
@@ -317,7 +318,23 @@ la idempotencia desde la propia base de datos.
 
 ---
 
-## 8 · Notas técnicas
+## 8 · Diagnóstico de errores 404
+
+Un 404 de Supabase casi siempre significa una de dos cosas: el cliente pide algo que no
+existe con ese nombre, o la base va por detrás del código.
+
+**Antes de desplegar**, `npm run check` cruza cada `.from()`, `.rpc()` y filtro `.eq()` de
+`js/api.js` contra `supabase/schema.sql` y avisa de tablas, vistas, funciones o columnas que
+no cuadren. Se ejecuta solo dentro de `npm run build`, así que un desajuste **detiene el
+despliegue** en lugar de llegar a producción.
+
+**En caliente**, si una consulta encuentra un objeto inexistente (`42P01`, `PGRST202`,
+`PGRST205`), la aplicación no se rompe: la funcionalidad que depende de él se desactiva, el
+resto sigue trabajando y el dashboard muestra un aviso con el nombre del objeto que falta y
+la instrucción para arreglarlo. Es lo que ocurre si añades funciones al código y olvidas
+volver a ejecutar `supabase/schema.sql`.
+
+## 9 · Notas técnicas
 
 - **Tailwind compilado**: ~32 KB, sin CDN ni advertencias en consola. Las clases nunca deben
   construirse por interpolación (`bg-${tono}-100` no se detecta al purgar): pásalas completas,

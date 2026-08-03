@@ -20,8 +20,60 @@
 
   const { startOfWeek, addDays, isoDay, normalize, uid } = UI;
 
+  /* ======================================================================
+     TOLERANCIA A ESQUEMAS DESACTUALIZADOS
+     Si el proyecto de Supabase no tiene ejecutada la última versión de
+     supabase/schema.sql, PostgREST responde 404 («no existe la tabla» o
+     «no está en la caché del esquema»). Antes eso reventaba pantallas
+     enteras porque un Promise.all rechazaba entero. Ahora se detecta, se
+     degrada con elegancia y se avisa de qué hay que ejecutar.
+     ====================================================================== */
+  let _faltaEsquema = null;   // nombre del objeto que falta, si lo hay
+
+  /** ¿El error es «este objeto no existe en la base»? */
+  const _esFalta = (error) =>
+    !!error && (
+      error.code === '42P01' ||                       // relation does not exist
+      error.code === 'PGRST202' ||                    // función RPC inexistente
+      error.code === 'PGRST205' ||                    // tabla fuera de la caché del esquema
+      /does not exist|schema cache|Not Found/i.test(error.message || '')
+    );
+
   /** Lanza si la consulta falló; si no, devuelve los datos. */
-  const ok = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
+  const ok = ({ data, error }) => {
+    if (error) {
+      if (_esFalta(error)) {
+        _faltaEsquema = (error.message.match(/"?public\.(\w+)"?|'(\w+)'/) || [])[1] || 'una tabla o función';
+        throw new Error(
+          `Tu base de datos está desactualizada: falta «${_faltaEsquema}». ` +
+          'Ejecuta supabase/schema.sql completo en el SQL Editor de Supabase.'
+        );
+      }
+      throw new Error(error.message);
+    }
+    return data;
+  };
+
+  /**
+   * Envuelve una consulta que puede no existir todavía en la base.
+   * Si falta el objeto devuelve `porDefecto` en vez de tumbar la pantalla.
+   */
+  const opcional = async (promesa, porDefecto) => {
+    try {
+      const res = await promesa;
+      if (res && res.error) {
+        if (_esFalta(res.error)) { _faltaEsquema = 'solicitudes_cita'; return porDefecto; }
+        throw new Error(res.error.message);
+      }
+      return res;
+    } catch (e) {
+      if (/desactualizada|does not exist|schema cache/i.test(e.message)) return porDefecto;
+      throw e;
+    }
+  };
+
+  /** Nombre del objeto que falta en la base, o null si todo está al día. */
+  const faltaEnEsquema = () => _faltaEsquema;
 
   /* ======================================================================
      AUTENTICACIÓN
@@ -569,13 +621,18 @@
   };
 
   /** Solicitudes de la sesión actual (RLS las limita a las propias). */
-  const misSolicitudes = async () =>
-    ok(await sb.from('solicitudes_cita').select('*').order('creado_en', { ascending: false }));
+  const misSolicitudes = async () => {
+    const r = await opcional(
+      sb.from('solicitudes_cita').select('*').order('creado_en', { ascending: false }),
+      { data: [], error: null });
+    return r.data || [];
+  };
 
   const listarSolicitudes = async ({ estado = null } = {}) => {
     let q = sb.from('solicitudes_cita').select('*').order('creado_en', { ascending: false });
     if (estado) q = q.eq('estado', estado);
-    return ok(await q);
+    const r = await opcional(q, { data: [], error: null });
+    return r.data || [];
   };
 
   const actualizarSolicitud = async (id, patch) =>
@@ -587,8 +644,16 @@
    * existía uno con ese correo en vez de duplicarlo.
    * @returns {string} id del paciente
    */
-  const convertirSolicitud = async (id) =>
-    ok(await sb.rpc('convertir_solicitud', { p_solicitud: id }));
+  const convertirSolicitud = async (id) => {
+    const { data, error } = await sb.rpc('convertir_solicitud', { p_solicitud: id });
+    if (error) {
+      if (_esFalta(error)) {
+        throw new Error('Falta la función «convertir_solicitud». Ejecuta supabase/schema.sql completo en el SQL Editor de Supabase.');
+      }
+      throw new Error(error.message);
+    }
+    return data;
+  };
 
   /* ======================================================================
      DASHBOARD
@@ -608,7 +673,9 @@
         sb.from('sorteos').select('*', { count: 'exact', head: true }).eq('estado', 'activo'),
         listarPromociones({ soloVigentes: true }),
         sb.from('pagos').select('monto').gte('pagado_en', semanaIni).then(ok),
-        sb.from('solicitudes_cita').select('*', { count: 'exact', head: true }).eq('estado', 'nueva')
+        // Tabla añadida después del primer despliegue: si aún no existe, 0.
+        opcional(sb.from('solicitudes_cita').select('*', { count: 'exact', head: true }).eq('estado', 'nueva'),
+                 { count: 0, error: null })
       ]);
 
     return {
@@ -719,7 +786,8 @@
     _impl: 'supabase',
     sb,
     auth,
-    miPaciente
+    miPaciente,
+    faltaEnEsquema
   });
 
   console.info('[CLIDANFI] API conectada a Supabase.');

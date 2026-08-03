@@ -7,6 +7,7 @@
     "postinstall": "node scripts/vendor.js",
     "env": "node scripts/generate-env.js",
     "vendor": "node scripts/vendor.js",
+    "check": "node scripts/check-schema.js",
     "css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --minify",
     "css:watch": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --watch",
     "dev": "npm run env && npm run vendor && npm run css:watch",

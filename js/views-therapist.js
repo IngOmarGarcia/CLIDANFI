@@ -58,9 +58,15 @@
       }, true));
   }
 
-  /** Barra inferior de guardado, común a valoración y rutinas. */
+  /**
+   * Barra inferior de guardado, común a valoración y rutinas.
+   *
+   * z-40 la coloca por encima del menú inferior (z-30). Además, estas dos
+   * pantallas declaran `sinNav` en el router, así que el menú ni siquiera se
+   * dibuja: la barra ocupa el borde inferior ella sola y nada la tapa.
+   */
   const barraGuardar = (accion, datos, texto) => `
-    <div class="fixed bottom-0 left-1/2 z-20 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 backdrop-blur nav-safe">
+    <div class="fixed bottom-0 left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,.25)] backdrop-blur nav-safe">
       <p id="indicador-pendiente" class="mb-1.5 hidden items-center justify-center gap-1.5 text-[11.5px] font-bold text-amber-700">
         ${icon('alert', 'h-3.5 w-3.5')} Tienes cambios sin guardar
       </p>
@@ -167,8 +173,26 @@
         <p class="mt-1 text-[11px] font-semibold leading-tight text-ink-500">${E(label)}</p>
       </div>`;
 
+    // Si alguna consulta encontró un objeto inexistente, la base va por detrás
+    // del código. No se rompe nada, pero hay que decirlo con claridad.
+    const falta = API.faltaEnEsquema ? API.faltaEnEsquema() : null;
+
     const html = `
       <div class="space-y-4 px-4 pt-4 anim-fade-up">
+
+        ${falta ? `
+          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+            <p class="flex items-center gap-2 text-[13px] font-extrabold text-amber-900">
+              ${icon('alert', 'h-4 w-4 shrink-0')} Base de datos desactualizada
+            </p>
+            <p class="mt-1.5 text-[12.5px] leading-snug text-amber-800">
+              Falta <code class="rounded bg-amber-100 px-1 font-mono text-[11.5px]">${E(falta)}</code> en tu proyecto de Supabase.
+              Las funciones que dependen de ello están desactivadas, pero el resto sigue trabajando con normalidad.
+            </p>
+            <p class="mt-2 text-[12px] font-semibold text-amber-900">
+              Solución: abre Supabase → SQL Editor y ejecuta <code class="rounded bg-amber-100 px-1 font-mono text-[11.5px]">supabase/schema.sql</code> completo.
+            </p>
+          </div>` : ''}
 
         ${r.solicitudes_nuevas ? `
           <button data-action="ver-solicitudes"
@@ -828,7 +852,9 @@
     }).join('');
 
     const html = `
-      <div class="space-y-3.5 px-4 pb-32 pt-4 anim-fade-up">
+      <!-- pb-48: deja sitio a la barra de guardar, que crece si aparecen el
+           aviso «sin guardar» y el resultado del guardado -->
+      <div class="space-y-3.5 px-4 pb-48 pt-4 anim-fade-up">
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">Valoración inicial</p>
           <p class="text-[15px] font-extrabold text-brand-900">${E(p.nombre)}</p>
@@ -955,7 +981,7 @@
       </button>`;
 
     const html = `
-      <div class="space-y-4 px-4 pb-40 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pb-48 pt-4 anim-fade-up">
 
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">${base ? 'Editar rutina' : 'Nueva rutina'}</p>
