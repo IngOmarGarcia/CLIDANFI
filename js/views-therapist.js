@@ -138,7 +138,15 @@
      1 · DASHBOARD
      ====================================================================== */
   async function dashboard() {
-    const [r, cfg] = await Promise.all([API.resumenDashboard(), API.getConfig()]);
+    // `verificarEsquema` PREGUNTA a la base en vez de fiarse del historial de
+    // errores de la sesión. Devuelve un nombre solo cuando PostgREST responde
+    // 42P01/PGRST205 (la relación no existe). Una tabla que existe pero está
+    // cerrada por RLS responde sin error, así que ya no se reporta ausente.
+    const [r, cfg, falta] = await Promise.all([
+      API.resumenDashboard(),
+      API.getConfig(),
+      API.verificarEsquema ? API.verificarEsquema() : Promise.resolve(null)
+    ]);
     const { ingresos } = r;
     const max = Math.max(1, ...ingresos.porDia.map((d) => d.total));
 
@@ -173,9 +181,8 @@
         <p class="mt-1 text-[11px] font-semibold leading-tight text-ink-500">${E(label)}</p>
       </div>`;
 
-    // Si alguna consulta encontró un objeto inexistente, la base va por detrás
-    // del código. No se rompe nada, pero hay que decirlo con claridad.
-    const falta = API.faltaEnEsquema ? API.faltaEnEsquema() : null;
+    // `falta` viene de la comprobación de arriba: si trae nombre, esa relación
+    // NO existe en la base. No se rompe nada, pero hay que decirlo con claridad.
 
     const html = `
       <div class="space-y-4 px-4 pt-4 anim-fade-up">

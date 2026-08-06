@@ -28,27 +28,92 @@
      enteras porque un Promise.all rechazaba entero. Ahora se detecta, se
      degrada con elegancia y se avisa de qué hay que ejecutar.
      ====================================================================== */
-  let _faltaEsquema = null;   // nombre del objeto que falta, si lo hay
+  /* Registro de objetos CONFIRMADOS ausentes. Es un conjunto, no una bandera
+     suelta, porque antes cualquier fallo dejaba pegado un único nombre —
+     casi siempre el equivocado— para el resto de la sesión. */
+  const _faltan = new Set();
 
-  /** ¿El error es «este objeto no existe en la base»? */
-  const _esFalta = (error) =>
-    !!error && (
-      error.code === '42P01' ||                       // relation does not exist
-      error.code === 'PGRST202' ||                    // función RPC inexistente
-      error.code === 'PGRST205' ||                    // tabla fuera de la caché del esquema
-      /does not exist|schema cache|Not Found/i.test(error.message || '')
-    );
+  /* Códigos de PostgreSQL / PostgREST. Son la fuente fiable: el texto del
+     mensaje cambia entre versiones y se presta a falsos positivos. */
+  const _COD_AUSENTE = ['42P01', '42883', 'PGRST202', 'PGRST205'];  // relación o función inexistente
+  const _COD_PERMISO = ['42501', 'PGRST301'];                       // GRANT o política RLS
+
+  const _codigo = (e) => String((e && e.code) || '');
+  const _texto = (e) => String((e && e.message) || '');
+
+  /**
+   * ¿El error dice, SIN AMBIGÜEDAD, que el objeto no existe en la base?
+   *
+   * Antes esto aceptaba cualquier mensaje con «does not exist», «schema cache»
+   * o «Not Found», y por ahí se colaban cosas que no son una tabla ausente:
+   *   · 42703 / PGRST204 → falta una COLUMNA, la tabla está perfectamente
+   *   · «Not Found» a secas → un 404 del proxy, de la CDN o de una URL mal puesta
+   *   · un 404 transitorio mientras PostgREST recarga su caché tras un deploy
+   * Todos ellos hacían aparecer el aviso de «base desactualizada» sin motivo.
+   */
+  const _esFalta = (error) => {
+    if (!error) return false;
+    const cod = _codigo(error);
+    if (cod) return _COD_AUSENTE.includes(cod);   // hay código: manda el código
+    // Sin código solo aceptamos la frase completa, nunca un fragmento suelto.
+    const t = _texto(error);
+    return /relation "[^"]*" does not exist/i.test(t)
+        || /(?:table|function|relation) [^\s]+ does not exist/i.test(t)
+        || /could not find the (?:table|function) '[^']*' in the schema cache/i.test(t);
+  };
+
+  /** ¿El error es «esa COLUMNA no existe / no la veo»? La tabla sí existe. */
+  const _esColumna = (error) => {
+    if (!error) return false;
+    const cod = _codigo(error);
+    if (cod) return cod === '42703' || cod === 'PGRST204';
+    return /column [^\s]+ does not exist/i.test(_texto(error))
+        || /could not find the '[^']*' column/i.test(_texto(error));
+  };
+
+  /** ¿El error es «la tabla existe pero no te dejo»? (RLS o GRANT) */
+  const _esPermiso = (error) => {
+    if (!error) return false;
+    const cod = _codigo(error);
+    if (cod) return _COD_PERMISO.includes(cod);
+    return /permission denied|row-level security/i.test(_texto(error));
+  };
+
+  /** Saca del mensaje el nombre real del objeto; `respaldo` si no se deduce. */
+  const _nombreDelObjeto = (error, respaldo = null) => {
+    const t = _texto(error);
+    const m = t.match(/relation "(?:public\.)?(\w+)"/i)
+           || t.match(/(?:table|function) '(?:public\.)?(\w+)'/i)
+           || t.match(/(?:for|on) (?:table|relation) "?(\w+)"?/i)
+           || t.match(/function (?:public\.)?(\w+)\s*\(/i);
+    return (m && m[1]) || respaldo || 'una tabla o función';
+  };
+
+  const _marcarFalta = (nombre) => { if (nombre) _faltan.add(nombre); };
+  /* Si el objeto respondió —aunque fuera para negar permiso— EXISTE, y todo
+     aviso previo sobre él queda obsoleto. Esto es lo que hace que el cartel
+     desaparezca solo en cuanto la base se pone al día, sin recargar. */
+  const _marcarPresente = (nombre) => { if (nombre) _faltan.delete(nombre); };
+
+  const _errPermiso = (nombre) => new Error(
+    `Sin permiso sobre «${nombre}»: la tabla existe pero las políticas RLS o los ` +
+    'GRANT no dejan pasar esta operación. Revísalas en Supabase → SQL Editor.'
+  );
+
+  const _errFalta = (nombre) => new Error(
+    `Tu base de datos está desactualizada: falta «${nombre}». ` +
+    'Ejecuta supabase/schema.sql completo en el SQL Editor de Supabase.'
+  );
 
   /** Lanza si la consulta falló; si no, devuelve los datos. */
   const ok = ({ data, error }) => {
     if (error) {
       if (_esFalta(error)) {
-        _faltaEsquema = (error.message.match(/"?public\.(\w+)"?|'(\w+)'/) || [])[1] || 'una tabla o función';
-        throw new Error(
-          `Tu base de datos está desactualizada: falta «${_faltaEsquema}». ` +
-          'Ejecuta supabase/schema.sql completo en el SQL Editor de Supabase.'
-        );
+        const nombre = _nombreDelObjeto(error);
+        _marcarFalta(nombre);
+        throw _errFalta(nombre);
       }
+      if (_esPermiso(error)) throw _errPermiso(_nombreDelObjeto(error));
       throw new Error(error.message);
     }
     return data;
@@ -57,23 +122,71 @@
   /**
    * Envuelve una consulta que puede no existir todavía en la base.
    * Si falta el objeto devuelve `porDefecto` en vez de tumbar la pantalla.
+   *
+   * @param {Promise} promesa        consulta de PostgREST
+   * @param {*}       porDefecto     qué devolver si el objeto no existe
+   * @param {object}  opts
+   * @param {string}  opts.objeto    a QUÉ tabla apunta esta consulta. Antes se
+   *   escribía 'solicitudes_cita' a fuego para las tres llamadas, así que un
+   *   tropiezo en `configuracion` acusaba a `solicitudes_cita`: ese era el
+   *   falso positivo que veías en el panel.
+   * @param {boolean} opts.tolerarPermiso  si un 42501 debe degradar en vez de
+   *   lanzar (para adornos del panel, no para pantallas de contenido).
+   * @param {boolean} opts.tolerarColumna  si una columna ausente (42703) debe
+   *   degradar. Solo para consultas con valores por defecto completos.
    */
-  const opcional = async (promesa, porDefecto) => {
-    try {
-      const res = await promesa;
-      if (res && res.error) {
-        if (_esFalta(res.error)) { _faltaEsquema = 'solicitudes_cita'; return porDefecto; }
+  const opcional = async (promesa, porDefecto,
+                          { objeto = null, tolerarPermiso = false, tolerarColumna = false } = {}) => {
+    // Un fallo de red o una excepción del cliente NO son un esquema viejo:
+    // se dejan subir tal cual en vez de disfrazarse de «falta una tabla».
+    const res = await promesa;
+
+    if (res && res.error) {
+      if (_esFalta(res.error)) {
+        _marcarFalta(_nombreDelObjeto(res.error, objeto));
+        return porDefecto;
+      }
+      if (_esPermiso(res.error)) {
+        _marcarPresente(objeto);            // respondió ⇒ la tabla está ahí
+        if (tolerarPermiso) return porDefecto;
+        throw _errPermiso(_nombreDelObjeto(res.error, objeto));
+      }
+      if (_esColumna(res.error)) {
+        _marcarPresente(objeto);            // la tabla está; le falta una columna
+        if (tolerarColumna) return porDefecto;
         throw new Error(res.error.message);
       }
-      return res;
-    } catch (e) {
-      if (/desactualizada|does not exist|schema cache/i.test(e.message)) return porDefecto;
-      throw e;
+      throw new Error(res.error.message);
     }
+
+    _marcarPresente(objeto);
+    return res;
+  };
+
+  /* --- Verificación activa del esquema ----------------------------------
+     El panel ya no se fía del historial de errores acumulado: pregunta.
+     La distinción que importa es la que antes no se hacía:
+       · sin error, o error de permiso (42501) → la tabla EXISTE
+       · 42P01 / PGRST205                      → la tabla NO existe
+     Una tabla con RLS activa y sin política de SELECT devuelve 0 filas y
+     NINGÚN error, así que jamás debe contarse como ausente. */
+  const OBJETOS_VERIFICABLES = ['solicitudes_cita', 'configuracion'];
+
+  const verificarEsquema = async () => {
+    await Promise.all(OBJETOS_VERIFICABLES.map(async (tabla) => {
+      try {
+        const { error } = await sb.from(tabla).select('*', { count: 'exact', head: true });
+        if (error && _esFalta(error)) _marcarFalta(tabla);
+        else _marcarPresente(tabla);
+      } catch {
+        // Caída de red: no se sabe nada nuevo, se respeta lo que ya constaba.
+      }
+    }));
+    return faltaEnEsquema();
   };
 
   /** Nombre del objeto que falta en la base, o null si todo está al día. */
-  const faltaEnEsquema = () => _faltaEsquema;
+  const faltaEnEsquema = () => (_faltan.size ? [..._faltan].join(', ') : null);
 
   /* ======================================================================
      AUTENTICACIÓN
@@ -273,12 +386,26 @@
     if (!_cfg || refrescar || (conSesion && !_cfgCompleta)) {
       // Base sin migrar (`configuracion` todavía no existe) ⇒ valores por
       // defecto. La aplicación sigue funcionando; solo no hay marca propia.
-      const res = await opcional(
-        sb.from('configuracion')
-          .select(conSesion ? CFG_COLS_TODAS : CFG_COLS_PUBLICAS)
-          .eq('id', 1).maybeSingle(),
-        { data: null, error: null }
-      );
+      // `tolerarPermiso`: la marca se pinta en la pantalla de acceso, y ahí
+      // `anon` solo tiene GRANT sobre las columnas públicas. Un 42501 aquí es
+      // esperable y nunca debe tumbar el arranque ni acusar a otra tabla.
+      //
+      // La marca es decorativa y `CFG_DEF` la cubre entera, así que esta
+      // lectura es «mejor esfuerzo»: ni un corte de red ni un 404 del proxy
+      // deben dejar la app en blanco. Lo que NO hace ya es convertir ese
+      // tropiezo en un aviso de esquema sobre otra tabla.
+      let res = null;
+      try {
+        res = await opcional(
+          sb.from('configuracion')
+            .select(conSesion ? CFG_COLS_TODAS : CFG_COLS_PUBLICAS)
+            .eq('id', 1).maybeSingle(),
+          { data: null, error: null },
+          { objeto: 'configuracion', tolerarPermiso: true, tolerarColumna: true }
+        );
+      } catch (e) {
+        console.warn('[CLIDANFI] No se pudo leer `configuracion`, se usa la marca por defecto:', e.message);
+      }
       _guardarEnCache(res && res.data ? res.data : null);
       _cfgCompleta = conSesion;
     }
@@ -721,14 +848,17 @@
   const misSolicitudes = async () => {
     const r = await opcional(
       sb.from('solicitudes_cita').select('*').order('creado_en', { ascending: false }),
-      { data: [], error: null });
+      { data: [], error: null },
+      { objeto: 'solicitudes_cita' });
     return r.data || [];
   };
 
   const listarSolicitudes = async ({ estado = null } = {}) => {
     let q = sb.from('solicitudes_cita').select('*').order('creado_en', { ascending: false });
     if (estado) q = q.eq('estado', estado);
-    const r = await opcional(q, { data: [], error: null });
+    // Sin `tolerarPermiso`: si RLS bloquea la lectura hay que decirlo, no
+    // pintar una lista vacía que parece «no hay solicitudes».
+    const r = await opcional(q, { data: [], error: null }, { objeto: 'solicitudes_cita' });
     return r.data || [];
   };
 
@@ -770,9 +900,11 @@
         sb.from('sorteos').select('*', { count: 'exact', head: true }).eq('estado', 'activo'),
         listarPromociones({ soloVigentes: true }),
         sb.from('pagos').select('monto').gte('pagado_en', semanaIni).then(ok),
-        // Tabla añadida después del primer despliegue: si aún no existe, 0.
+        // Contador decorativo del panel: si la tabla aún no existe, o si RLS
+        // no deja contarla, vale 0. Nunca debe tumbar el resto del resumen.
         opcional(sb.from('solicitudes_cita').select('*', { count: 'exact', head: true }).eq('estado', 'nueva'),
-                 { count: 0, error: null })
+                 { count: 0, error: null },
+                 { objeto: 'solicitudes_cita', tolerarPermiso: true })
       ]);
 
     return {
@@ -888,7 +1020,8 @@
     auth,
     getConfig,
     miPaciente,
-    faltaEnEsquema
+    faltaEnEsquema,
+    verificarEsquema
   });
 
   console.info('[CLIDANFI] API conectada a Supabase.');
