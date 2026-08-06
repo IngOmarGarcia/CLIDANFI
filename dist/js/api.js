@@ -425,6 +425,38 @@
   };
 
   /**
+   * Convierte un dataURL en Blob decodificándolo aquí mismo.
+   *
+   * Antes esto era `await (await fetch(dataUrl)).blob()`, y el navegador
+   * considera `fetch('data:…')` una CONEXIÓN: la gobierna `connect-src`, no
+   * `img-src`. Con la CSP de producción eso se rechazaba y salía
+   * «TypeError: Failed to fetch» sin que la petición llegara nunca a Supabase.
+   * Decodificar en local no toca la red, así que funciona con cualquier CSP.
+   */
+  const _dataUrlABlob = (dataUrl) => {
+    const s = String(dataUrl || '');
+    const coma = s.indexOf(',');
+    if (!s.startsWith('data:') || coma === -1) {
+      throw new Error('La imagen no tiene un formato válido.');
+    }
+
+    const cabecera = s.slice(5, coma);              // p. ej. «image/jpeg;base64»
+    const tipo = cabecera.split(';')[0] || 'application/octet-stream';
+    const cuerpo = s.slice(coma + 1);
+
+    // Las que produce UI.readImageCompressed son siempre base64, pero un
+    // dataURL puede venir sin codificar (percent-encoding).
+    if (!/;base64/i.test(cabecera)) {
+      return new Blob([decodeURIComponent(cuerpo)], { type: tipo });
+    }
+
+    const binario = atob(cuerpo);
+    const bytes = new Uint8Array(binario.length);
+    for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+    return new Blob([bytes], { type: tipo });
+  };
+
+  /**
    * Sube el logo al bucket público `marca` y deja su URL en la configuración.
    * Recibe el dataURL ya comprimido por UI.readImageCompressed.
    * El logo anterior se borra: no tiene sentido acumularlos.
@@ -432,7 +464,7 @@
   const subirLogo = async (dataUrl) => {
     const anterior = (await getConfig()).logo_ruta;
 
-    const blob = await (await fetch(dataUrl)).blob();
+    const blob = _dataUrlABlob(dataUrl);
     const ruta = `${uid('logo')}.jpg`;
     ok(await sb.storage.from('marca').upload(ruta, blob, { contentType: 'image/jpeg', upsert: false }));
 
@@ -617,7 +649,8 @@
 
   /** Sube un dataURL al bucket `evidencias` y devuelve una URL firmada. */
   const _subirEvidencia = async (dataUrl, pacienteId) => {
-    const blob = await (await fetch(dataUrl)).blob();
+    // Mismo motivo que en subirLogo: `fetch('data:…')` lo bloquea connect-src.
+    const blob = _dataUrlABlob(dataUrl);
     const ruta = `${pacienteId}/${uid('img')}.jpg`;
     ok(await sb.storage.from('evidencias').upload(ruta, blob, { contentType: 'image/jpeg', upsert: false }));
     const { data } = await sb.storage.from('evidencias').createSignedUrl(ruta, 60 * 60 * 24 * 365);

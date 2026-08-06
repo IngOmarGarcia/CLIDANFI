@@ -29,7 +29,12 @@
     # La app solo habla con Supabase y carga las fuentes de Google.
     # 'unsafe-inline' en script-src es necesario para los handlers inline del
     # shell; si los eliminas, endurece esta línea quitándolo.
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    #
+    # `data:` y `blob:` en connect-src: el navegador trata `fetch('data:…')`
+    # como una CONEXIÓN, no como una imagen, así que lo gobierna connect-src y
+    # no img-src. Sin ellos, subir el logo o un adjunto moría con
+    # «TypeError: Failed to fetch» sin llegar nunca a Supabase.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' data: blob: https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
 #--- Caché ---------------------------------------------------------------------
 # El HTML nunca se cachea (para que un deploy se vea al instante);

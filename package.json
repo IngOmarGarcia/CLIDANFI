@@ -9,6 +9,8 @@
     "vendor": "node scripts/vendor.js",
     "check": "node scripts/check-schema.js",
     "test:esquema": "node scripts/test-esquema.js",
+    "test:subidas": "node scripts/test-subidas.js",
+    "test": "npm run check && npm run test:esquema && npm run test:subidas",
     "css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --minify",
     "css:watch": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --watch",
     "dev": "npm run env && npm run vendor && npm run css:watch",
