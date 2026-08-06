@@ -1940,6 +1940,126 @@
   }
 
   /* ======================================================================
+     PERSONALIZACIÓN DE LA CLÍNICA
+
+     Todo lo que hay que cambiar para poner la aplicación a nombre de otra
+     clínica. Vive en la tabla `configuracion`, no en el código, así que el
+     mismo despliegue sirve para cualquier cliente.
+
+     El logo no se sube hasta pulsar «Guardar»: hasta entonces solo hay una
+     vista previa local, igual que en el resto de formularios de la app.
+     ====================================================================== */
+  const LOGO_POR_DEFECTO = './assets/logo-clidanfi.jpeg';
+
+  async function sheetClinica() {
+    const cfg = await API.getConfig({ refrescar: true });
+
+    let logoNuevo = null;   // dataURL comprimido, pendiente de subir
+    let quitar = false;     // el fisio pidió volver al logo por defecto
+
+    const tieneLogo = () => !!(cfg.logo_url || cfg.logo_ruta);
+    const previa = () => (quitar ? LOGO_POR_DEFECTO : (logoNuevo || cfg.logo_url || LOGO_POR_DEFECTO));
+
+    openSheet({
+      title: 'Personalizar clínica',
+      subtitle: 'Se aplica en todos los dispositivos',
+      body: `
+        <div class="space-y-4">
+
+          <div class="flex flex-col items-center gap-3 rounded-2xl border border-ink-200 bg-ink-50 p-4">
+            <img id="cli-logo-previa" src="${E(previa())}" alt="Vista previa del logo"
+                 class="h-24 w-24 rounded-2xl border border-ink-200 bg-white object-contain" />
+
+            <label class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-ink-300 bg-white py-3.5 active:scale-[.99]">
+              ${icon('image', 'h-5 w-5 text-ink-400')}
+              <span class="text-[12.5px] font-bold text-ink-600">Elegir imagen del logo</span>
+              <input id="f-cli-logo" type="file" accept="image/*" class="sr-only" />
+            </label>
+
+            <button id="btn-cli-quitar" type="button"
+              class="${tieneLogo() ? '' : 'hidden '}text-[12px] font-bold text-rose-600 active:opacity-70">
+              Quitar logo y usar el de por defecto
+            </button>
+
+            <p class="text-center text-[11px] leading-snug text-ink-400">
+              Se guarda cuadrada y comprimida. Se ve en la cabecera, en la pantalla
+              de acceso, en el fondo de escritorio y en el icono de la pestaña.
+            </p>
+          </div>
+
+          <div><label for="f-cli-nombre" class="mb-1 block text-[12px] font-bold text-ink-700">Nombre de la clínica *</label>
+            <input id="f-cli-nombre" class="field" value="${E(cfg.clinica)}" placeholder="Ej. Clínica Danfi" /></div>
+
+          <div><label for="f-cli-lema" class="mb-1 block text-[12px] font-bold text-ink-700">Lema</label>
+            <input id="f-cli-lema" class="field" value="${E(cfg.lema)}" placeholder="Ej. Fisioterapia y rehabilitación" /></div>
+
+          <div><label for="f-cli-precio" class="mb-1 block text-[12px] font-bold text-ink-700">Precio de sesión</label>
+            <input id="f-cli-precio" type="number" inputmode="decimal" min="0" step="1"
+                   class="field" value="${E(String(cfg.precio_sesion))}" />
+            <p class="mt-1 px-1 text-[11px] text-ink-400">Se propone como monto al registrar una asistencia.</p></div>
+        </div>`,
+      footer: `<button id="btn-guardar-clinica"
+        class="w-full rounded-xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98] disabled:opacity-60">
+        Guardar cambios</button>`,
+      onMount: (root) => {
+        const img = root.querySelector('#cli-logo-previa');
+        const btnQuitar = root.querySelector('#btn-cli-quitar');
+        const repintar = () => {
+          img.src = previa();
+          btnQuitar.classList.toggle('hidden', !(tieneLogo() || logoNuevo) || quitar);
+        };
+
+        root.querySelector('#f-cli-logo').addEventListener('change', async (e) => {
+          const file = e.target.files[0];
+          e.target.value = '';
+          if (!file) return;
+          try {
+            // Cuadro pequeño: el logo se pinta como mucho a 96 px.
+            logoNuevo = await readImageCompressed(file, 512, 0.85);
+            quitar = false;
+            repintar();
+          } catch (err) {
+            toast('No se pudo procesar la imagen', 'error');
+          }
+        });
+
+        btnQuitar.addEventListener('click', () => { quitar = true; logoNuevo = null; repintar(); });
+
+        root.querySelector('#btn-guardar-clinica').addEventListener('click', async (e) => {
+          const boton = e.currentTarget;
+          const clinica = val(root, '#f-cli-nombre');
+          if (!clinica) return toast('El nombre de la clínica es obligatorio', 'error');
+
+          boton.disabled = true;
+          boton.textContent = 'Guardando…';
+          try {
+            // El logo primero: `setConfig` no toca las columnas que no recibe,
+            // así que el orden no pisa la URL recién subida.
+            if (logoNuevo) await API.subirLogo(logoNuevo);
+            else if (quitar && tieneLogo()) await API.quitarLogo();
+
+            const nueva = await API.setConfig({
+              clinica,
+              lema: val(root, '#f-cli-lema'),
+              precio_sesion: Number(val(root, '#f-cli-precio')) || 0
+            });
+
+            closeSheet();
+            await App.aplicarMarca(nueva);
+            toast('Configuración guardada');
+            App.render();
+          } catch (err) {
+            console.error('[CLIDANFI] Error al guardar la configuración:', err);
+            toast(err.message || 'No se pudo guardar', 'error', 4000);
+            boton.disabled = false;
+            boton.textContent = 'Guardar cambios';
+          }
+        });
+      }
+    });
+  }
+
+  /* ======================================================================
      EXPORT
      ====================================================================== */
   global.VistaFisio = {
@@ -1947,6 +2067,6 @@
     leerValoracion, rutinaEnEdicion, hayCambiosSinGuardar, marcarLimpio,
     sheetPaciente, sheetCita, sheetMenuCita, sheetAsistencia, sheetNota, sheetFoto,
     sheetSorteo, sheetParticipantes, ejecutarSorteo, sheetPromos, sheetPromoForm,
-    sheetSolicitudes
+    sheetSolicitudes, sheetClinica
   };
 })(window);

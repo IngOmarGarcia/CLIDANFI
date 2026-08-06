@@ -105,6 +105,13 @@
   let _miPacienteId = null;
 
   const _recordarSesion = async (s) => {
+    // Al cambiar de usuario (o al salir) se tira la configuración cacheada:
+    // contiene columnas que solo puede ver quien tiene sesión, y no deben
+    // sobrevivir en memoria al cierre.
+    const antes = _sesion ? _sesion.user.id : null;
+    const ahora = s ? s.user.id : null;
+    if (antes !== ahora) { _cfg = null; _cfgCompleta = false; }
+
     _sesion = s;
     _miPacienteId = null;
     if (s && s.perfil.rol === 'paciente') {
@@ -209,24 +216,114 @@
   };
 
   /* ======================================================================
-     CONFIGURACIÓN  (se guarda local: son preferencias de UI)
-     ====================================================================== */
-  const CFG_KEY = 'clidanfi.config';
-  const CFG_DEF = { clinica: 'CLIDANFI', lema: 'Fisioterapia y rehabilitación', fisio: '', precio_sesion: 450 };
+     CONFIGURACIÓN DE LA CLÍNICA  ·  tabla `configuracion` (fila única)
 
-  const getConfig = async () => {
-    const cfg = { ...CFG_DEF };
-    try { Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch { /* preferencias corruptas */ }
-    if (!cfg.fisio) {
-      const s = await auth.sesion();
-      cfg.fisio = s ? s.perfil.nombre : '';
+     Antes vivía en localStorage, lo que la ataba a un navegador. Ahora es
+     del servidor: la marca es la misma en el móvil de recepción, en la
+     tablet del box y en la pantalla de acceso de cualquier paciente.
+
+     `getConfig` debe funcionar SIN sesión (la pantalla de acceso pinta el
+     logo antes de entrar), por eso queda fuera del guardia `_proteger`.
+     Quien la escribe sí está acotado: por `SOLO_FISIO` aquí y, de verdad,
+     por la política `config_edita_fisio` en el servidor.
+     ====================================================================== */
+  const CFG_DEF = {
+    clinica: 'CLIDANFI',
+    lema: 'Fisioterapia y rehabilitación',
+    logo_url: '',
+    logo_ruta: '',
+    fisio: '',
+    precio_sesion: 450
+  };
+
+  /* El bucket va como literal en cada llamada, no como constante:
+     scripts/check-schema.js busca `storage.from('…')` para comprobar que el
+     bucket existe en schema.sql, y una variable lo dejaría ciego. */
+
+  /* ---------------------------------------------------------------------
+     COLUMNAS SEGÚN QUIÉN PREGUNTA
+
+     `anon` solo tiene privilegio de lectura sobre la marca (ver el bloque
+     de grants en schema.sql). Pedirle `select('*')` daría «permission
+     denied for column precio_sesion», así que la lista va explícita y debe
+     coincidir con la del `grant`.
+     --------------------------------------------------------------------- */
+  const CFG_COLS_PUBLICAS = 'id, clinica, lema, logo_url';
+  const CFG_COLS_TODAS    = 'id, clinica, lema, logo_url, logo_ruta, precio_sesion';
+
+  /* Caché en memoria: la marca se pide en cada render del dashboard y del
+     login, y cambia una vez cada muchos meses. */
+  let _cfg = null;
+  let _cfgCompleta = false;   // ¿la caché incluye las columnas privadas?
+
+  /** Sobrescribe la caché normalizando los tipos que llegan de PostgREST. */
+  const _guardarEnCache = (fila) => {
+    _cfg = { ...CFG_DEF, ...(fila || {}) };
+    _cfg.precio_sesion = Number(_cfg.precio_sesion) || 0;
+    delete _cfg.fisio;          // no se persiste: sale de la sesión
+    return _cfg;
+  };
+
+  const getConfig = async ({ refrescar = false } = {}) => {
+    // Con sesión hay derecho a las columnas privadas. Si la caché se llenó
+    // antes de iniciarla (el arranque pinta la marca primero), se rellena:
+    // de lo contrario `precio_sesion` se quedaría en su valor por defecto.
+    const conSesion = !!_sesion;
+
+    if (!_cfg || refrescar || (conSesion && !_cfgCompleta)) {
+      // Base sin migrar (`configuracion` todavía no existe) ⇒ valores por
+      // defecto. La aplicación sigue funcionando; solo no hay marca propia.
+      const res = await opcional(
+        sb.from('configuracion')
+          .select(conSesion ? CFG_COLS_TODAS : CFG_COLS_PUBLICAS)
+          .eq('id', 1).maybeSingle(),
+        { data: null, error: null }
+      );
+      _guardarEnCache(res && res.data ? res.data : null);
+      _cfgCompleta = conSesion;
+    }
+    // El nombre del fisioterapeuta es el de quien tiene la sesión abierta.
+    return { ..._cfg, fisio: _sesion ? _sesion.perfil.nombre : '' };
+  };
+
+  const CFG_CAMPOS = ['clinica', 'lema', 'logo_url', 'logo_ruta', 'precio_sesion'];
+
+  const setConfig = async (patch) => {
+    const fila = { id: 1, actualizado_en: new Date().toISOString() };
+    for (const k of CFG_CAMPOS) if (k in (patch || {})) fila[k] = patch[k];
+
+    _guardarEnCache(ok(await sb.from('configuracion').upsert(fila).select(CFG_COLS_TODAS).single()));
+    _cfgCompleta = true;
+    return getConfig();
+  };
+
+  /**
+   * Sube el logo al bucket público `marca` y deja su URL en la configuración.
+   * Recibe el dataURL ya comprimido por UI.readImageCompressed.
+   * El logo anterior se borra: no tiene sentido acumularlos.
+   */
+  const subirLogo = async (dataUrl) => {
+    const anterior = (await getConfig()).logo_ruta;
+
+    const blob = await (await fetch(dataUrl)).blob();
+    const ruta = `${uid('logo')}.jpg`;
+    ok(await sb.storage.from('marca').upload(ruta, blob, { contentType: 'image/jpeg', upsert: false }));
+
+    const { data } = sb.storage.from('marca').getPublicUrl(ruta);
+    const cfg = await setConfig({ logo_url: data.publicUrl, logo_ruta: ruta });
+
+    if (anterior && anterior !== ruta) {
+      // Si el borrado falla no se pierde nada: solo queda un archivo huérfano.
+      await sb.storage.from('marca').remove([anterior]).catch(() => {});
     }
     return cfg;
   };
 
-  const setConfig = async (patch) => {
-    const cfg = { ...(await getConfig()), ...patch };
-    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+  /** Vuelve al logo por defecto de assets/ sin tocar el resto de la marca. */
+  const quitarLogo = async () => {
+    const anterior = (await getConfig()).logo_ruta;
+    const cfg = await setConfig({ logo_url: '', logo_ruta: '' });
+    if (anterior) await sb.storage.from('marca').remove([anterior]).catch(() => {});
     return cfg;
   };
 
@@ -717,7 +814,8 @@
     'listarSorteos', 'obtenerSorteo', 'guardarSorteo', 'eliminarSorteo',
     'sincronizarBoletos', 'participantesDeSorteo', 'realizarSorteo', 'publicarGanador',
     'listarSolicitudes', 'actualizarSolicitud', 'convertirSolicitud',
-    'resumenDashboard'
+    'resumenDashboard',
+    'setConfig', 'subirLogo', 'quitarLogo'
   ];
 
   // El paciente solo accede a lo suyo. El valor es la posición del argumento
@@ -730,7 +828,7 @@
   };
 
   // Abiertas a cualquier sesión (la RLS ya las acota por sí sola):
-  //   getConfig · setConfig · listarPromociones · miPaciente
+  //   listarPromociones · miPaciente
   //   sorteosVitrina · crearSolicitudCita · misSolicitudes
 
   async function _autorizar(nombre, args) {
@@ -767,7 +865,7 @@
      EXPORT
      ====================================================================== */
   global.API = Object.assign(_proteger({
-    getConfig, setConfig,
+    setConfig, subirLogo, quitarLogo,
     listarPacientes, obtenerPaciente, crearPaciente, actualizarPaciente, eliminarPaciente,
     citasDeHoy, proximasCitas, citasDePaciente, proximaCitaDePaciente, crearCita, actualizarCita, eliminarCita,
     registrarAsistencia, asistenciasDePaciente, eliminarAsistencia,
@@ -783,9 +881,12 @@
     resumenDashboard
   }), {
     // Fuera del guardia: deben funcionar SIN sesión previa.
+    // `getConfig` está aquí porque la pantalla de acceso pinta la marca antes
+    // de que exista sesión; su lectura ya es pública por RLS.
     _impl: 'supabase',
     sb,
     auth,
+    getConfig,
     miPaciente,
     faltaEnEsquema
   });

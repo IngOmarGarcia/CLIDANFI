@@ -46,10 +46,11 @@
      se puede pedir la primera cita.
      ====================================================================== */
   async function vitrina() {
-    const [promos, sorteos, solicitudes] = await Promise.all([
+    const [promos, sorteos, solicitudes, cfg] = await Promise.all([
       API.listarPromociones({ soloVigentes: true }),
       API.sorteosVitrina(),
-      API.misSolicitudes()
+      API.misSolicitudes(),
+      API.getConfig()
     ]);
 
     const pendiente = solicitudes.find((s) => s.estado === 'nueva' || s.estado === 'contactada');
@@ -60,7 +61,7 @@
 
         <div class="bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800 px-5 pb-20 pt-7 text-white">
           <p class="text-[12px] font-bold uppercase tracking-wider text-brand-200">Bienvenido a</p>
-          <h2 class="mt-1 text-[26px] font-extrabold leading-tight tracking-tight">CLIDANFI</h2>
+          <h2 class="mt-1 text-[26px] font-extrabold leading-tight tracking-tight">${E(cfg.clinica)}</h2>
           <p class="mt-1.5 text-[13px] leading-snug text-brand-100">
             Terapia física y rehabilitación. Solicita tu primera cita y conoce los beneficios vigentes.
           </p>
@@ -523,7 +524,7 @@
      3 · PROMOCIONES
      ====================================================================== */
   async function promociones() {
-    const list = await API.listarPromociones();
+    const [list, cfg] = await Promise.all([API.listarPromociones(), API.getConfig()]);
     const vigentes = list.filter((p) => p.vigente);
     const pasadas = list.filter((p) => !p.vigente);
 
@@ -556,7 +557,7 @@
       <div class="space-y-4 px-4 pb-4 pt-4 anim-fade-up">
         <div class="px-1">
           <h2 class="text-[20px] font-extrabold tracking-tight text-ink-900">Promociones</h2>
-          <p class="mt-0.5 text-[12.5px] text-ink-500">Beneficios vigentes para pacientes de CLIDANFI.</p>
+          <p class="mt-0.5 text-[12.5px] text-ink-500">Beneficios vigentes para pacientes de ${E(cfg.clinica)}.</p>
         </div>
 
         ${vigentes.length ? vigentes.map(tarjeta).join('')

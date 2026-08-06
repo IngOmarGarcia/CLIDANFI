@@ -8,8 +8,10 @@
   <meta name="robots" content="noindex, nofollow" />
   <title>CLIDANFI · Gestión Clínica</title>
 
-  <link rel="icon" href="./assets/logo-clidanfi.jpeg" type="image/jpeg" />
-  <link rel="apple-touch-icon" href="./assets/logo-clidanfi.jpeg" />
+  <!-- El logo por defecto es el respaldo: si la clínica sube el suyo desde
+       «Mi cuenta → Personalizar clínica», app.js reescribe estos href. -->
+  <link rel="icon" id="brand-favicon" href="./assets/logo-clidanfi.jpeg" type="image/jpeg" />
+  <link rel="apple-touch-icon" id="brand-apple-icon" href="./assets/logo-clidanfi.jpeg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,12 +25,15 @@
 <body class="app-bg font-sans text-ink-900 antialiased">
 
   <!-- ▼ Marca de agua del logo · solo visible en escritorio ▼ -->
+  <!-- Se oculta (no se elimina) si la imagen falla: app.js debe poder
+       reasignarle el logo de la clínica cuando llegue de la base. -->
   <img
+    id="app-watermark"
     class="app-watermark"
     src="./assets/logo-clidanfi.jpeg"
     alt=""
     aria-hidden="true"
-    onerror="this.remove();"
+    onerror="this.style.display='none';"
   />
 
   <div class="app-shell">
@@ -45,11 +50,12 @@
         <div class="flex items-center gap-3 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
 
           <!-- ▼▼▼ LOGO DE LA CLÍNICA ▼▼▼ -->
-          <!-- Copia tu archivo en ./assets/logo-clidanfi.jpeg (ver assets/LEER-ME.txt) -->
+          <!-- Valor de respaldo. El definitivo lo pinta App.aplicarMarca()
+               con lo que haya en la tabla `configuracion`. -->
           <img
             id="brand-logo"
             src="./assets/logo-clidanfi.jpeg"
-            alt="Logo de CLIDANFI, clínica de fisioterapia"
+            alt="Logo de la clínica"
             width="44" height="44"
             class="h-11 w-11 shrink-0 rounded-xl object-contain"
             onerror="this.classList.add('logo-fallback'); this.removeAttribute('src');"
@@ -57,7 +63,7 @@
           <!-- ▲▲▲ FIN LOGO ▲▲▲ -->
 
           <div class="min-w-0 flex-1">
-            <h1 class="truncate text-[15px] font-extrabold leading-tight tracking-tight text-ink-900">CLIDANFI</h1>
+            <h1 id="brand-name" class="truncate text-[15px] font-extrabold leading-tight tracking-tight text-ink-900">CLIDANFI</h1>
             <p id="header-subtitle" class="truncate text-[11px] font-medium text-ink-500">Clínica de Fisioterapia</p>
           </div>
 

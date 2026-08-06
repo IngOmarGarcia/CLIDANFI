@@ -9,31 +9,61 @@
   const { escapeHtml: E, icon, toast } = UI;
 
   /* ======================================================================
-     BLOQUE DE MARCA (logo + nombre)
-     El <img> queda limpio: en cuanto exista assets/logo-clidanfi.jpeg se ve.
+     BLOQUE DE MARCA (logo + nombre + lema)
+
+     Sale de la tabla `configuracion`, cuya lectura es pública precisamente
+     para que esta pantalla —que se pinta sin sesión— muestre el logo de la
+     clínica correcta. Sin logo propio se usa el de assets/.
      ====================================================================== */
-  const marca = () => `
+  const MARCA_DEF = { clinica: 'CLIDANFI', lema: 'Fisioterapia y rehabilitación', logo_url: '' };
+  const LOGO_POR_DEFECTO = './assets/logo-clidanfi.jpeg';
+
+  /* Última marca leída. `confirmaTuCorreo` y la pantalla de configuración son
+     síncronas y no pueden esperar a la red: reutilizan lo ya cargado. */
+  let _marca = { ...MARCA_DEF };
+
+  const marca = (cfg) => {
+    const c = { ..._marca, ...(cfg || {}) };
+    return `
     <div class="mb-8 flex flex-col items-center text-center">
       <!-- ▼ LOGO DE LA CLÍNICA ▼ -->
       <img
-        src="./assets/logo-clidanfi.jpeg"
-        alt="Logo de CLIDANFI, clínica de fisioterapia"
+        src="${E(c.logo_url || LOGO_POR_DEFECTO)}"
+        alt="Logo de ${E(c.clinica)}"
         width="88" height="88"
         class="h-20 w-20 rounded-2xl object-contain"
         onerror="this.classList.add('logo-fallback'); this.removeAttribute('src');"
       />
       <!-- ▲ FIN LOGO ▲ -->
-      <h1 class="mt-4 text-[26px] font-extrabold tracking-tight text-ink-900">CLIDANFI</h1>
-      <p class="mt-1 text-[13px] font-medium text-ink-500">Fisioterapia y rehabilitación</p>
+      <h1 class="mt-4 text-[26px] font-extrabold tracking-tight text-ink-900">${E(c.clinica)}</h1>
+      <p class="mt-1 text-[13px] font-medium text-ink-500">${E(c.lema)}</p>
     </div>`;
+  };
+
+  /**
+   * Lee la marca del servidor. No requiere sesión: la política
+   * `config_lectura_publica` alcanza al rol anon. Si falla, se conservan los
+   * valores por defecto y la pantalla de acceso sigue siendo usable.
+   */
+  const cargarMarca = async () => {
+    if (!global.API || !API.getConfig) return _marca;
+    try {
+      _marca = { ..._marca, ...(await API.getConfig()) };
+    } catch (e) {
+      console.warn('[CLIDANFI] No se pudo leer la marca de la clínica:', e.message);
+    }
+    return _marca;
+  };
 
   /* ======================================================================
      1 · ACCESO
      ====================================================================== */
   async function login() {
+    const cfg = await cargarMarca();
+
     const html = `
       <div class="flex min-h-[100dvh] flex-col justify-center px-6 py-10 anim-fade-up">
-        ${marca()}
+        ${marca(cfg)}
 
         <!-- Entrar / Crear cuenta -->
         <div class="mb-5 flex gap-1 rounded-2xl bg-ink-100 p-1" role="tablist">
@@ -183,7 +213,7 @@
             root.innerHTML = confirmaTuCorreo(r.email);
             return;
           }
-          toast('¡Bienvenido a CLIDANFI!');
+          toast(`¡Bienvenido a ${_marca.clinica}!`);
           await App.entrar();
         } catch (err) {
           mostrarErrorReg(err.message || 'No se pudo crear la cuenta.');

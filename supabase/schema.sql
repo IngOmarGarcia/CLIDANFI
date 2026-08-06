@@ -717,5 +717,82 @@ begin
 end $$;
 
 -- ============================================================================
+-- 18 · CONFIGURACIÓN DE LA CLÍNICA (marca blanca)
+--
+--     Fila ÚNICA (`check (id = 1)`): esta instancia atiende a una sola
+--     clínica. Aquí vive lo que cambia al vender la aplicación a otra:
+--     el logo, el nombre y el lema.
+--
+--     `perfiles.nombre` sigue siendo la fuente del nombre del fisioterapeuta;
+--     no se duplica aquí.
+-- ============================================================================
+create table if not exists configuracion (
+  id             int primary key default 1 check (id = 1),
+  clinica        text not null default 'CLIDANFI',
+  lema           text not null default 'Fisioterapia y rehabilitación',
+  logo_url       text default '',
+  logo_ruta      text default '',
+  precio_sesion  numeric(10,2) not null default 450,
+  actualizado_en timestamptz not null default now()
+);
+
+-- La fila nace con los valores por defecto: la app nunca tiene que crearla.
+insert into configuracion (id) values (1) on conflict (id) do nothing;
+
+alter table configuracion enable row level security;
+
+/* La pantalla de acceso muestra el logo ANTES de iniciar sesión, así que la
+   lectura debe alcanzar también al rol `anon`. Lo que se expone es lo mismo
+   que antes estaba escrito a mano en index.html: marca pública, no datos
+   clínicos. La escritura sigue siendo exclusiva del fisioterapeuta. */
+drop policy if exists config_lectura_publica on configuracion;
+create policy config_lectura_publica on configuracion for select
+  to anon, authenticated using (true);
+
+drop policy if exists config_edita_fisio on configuracion;
+create policy config_edita_fisio on configuracion for all to authenticated
+  using (es_fisio()) with check (es_fisio());
+
+/* ----------------------------------------------------------------------------
+   PRIVILEGIOS POR COLUMNA
+
+   La RLS es por FILA: no sabe distinguir columnas, y aquí conviven la marca
+   (pública por necesidad) con `precio_sesion` y `logo_ruta`, que no tienen por
+   qué salir a un visitante sin cuenta. Eso lo resuelven los privilegios de
+   columna de PostgreSQL, no una política.
+
+   `id` entra en la lista porque el cliente filtra por él (.eq('id', 1)) y
+   filtrar exige privilegio de lectura sobre esa columna.
+
+   ⚠ Al restringir `anon` a estas columnas, un `select *` desde la pantalla de
+   acceso daría «permission denied». Por eso js/api.js pide siempre la lista
+   explícita de columnas. Si tocas una, toca la otra.
+   ---------------------------------------------------------------------------- */
+revoke all on configuracion from anon;
+grant select (id, clinica, lema, logo_url) on configuracion to anon;
+
+-- Quien ha iniciado sesión sí ve la tabla entera; la RLS de arriba decide
+-- quién puede además escribirla.
+grant select, insert, update on configuracion to authenticated;
+
+-- ---- Bucket del logo -------------------------------------------------------
+-- Público por el mismo motivo que la tabla: el login lo pide sin sesión.
+insert into storage.buckets (id, name, public)
+values ('marca', 'marca', true)
+on conflict (id) do nothing;
+
+drop policy if exists "todos leen marca" on storage.objects;
+create policy "todos leen marca" on storage.objects for select
+  using (bucket_id = 'marca');
+
+drop policy if exists "fisio sube marca" on storage.objects;
+create policy "fisio sube marca" on storage.objects for insert
+  to authenticated with check (bucket_id = 'marca' and es_fisio());
+
+drop policy if exists "fisio borra marca" on storage.objects;
+create policy "fisio borra marca" on storage.objects for delete
+  to authenticated using (bucket_id = 'marca' and es_fisio());
+
+-- ============================================================================
 -- LISTO. Siguiente paso: supabase/seed.sql
 -- ============================================================================

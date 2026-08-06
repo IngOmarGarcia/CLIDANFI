@@ -256,6 +256,43 @@
       </div>`;
   }
 
+  /* ======================================================================
+     MARCA DE LA CLÍNICA
+     Lo que cambia al vender la aplicación a otra clínica vive en la tabla
+     `configuracion`, no en el HTML. Esta función es el único punto que
+     traduce esa configuración al chrome de la aplicación.
+     ====================================================================== */
+  const LOGO_POR_DEFECTO = './assets/logo-clidanfi.jpeg';
+
+  async function aplicarMarca(cfg) {
+    if (!global.API || !API.getConfig) return null;
+
+    const c = cfg || await API.getConfig();
+    const logo = c.logo_url || LOGO_POR_DEFECTO;
+
+    const header = document.getElementById('brand-logo');
+    if (header) {
+      // Si un logo anterior falló, el onerror del HTML dejó la clase puesta.
+      header.classList.remove('logo-fallback');
+      header.src = logo;
+      header.alt = `Logo de ${c.clinica}`;
+    }
+
+    const agua = document.getElementById('app-watermark');
+    if (agua) { agua.style.display = ''; agua.src = logo; }
+
+    const nombre = document.getElementById('brand-name');
+    if (nombre) nombre.textContent = c.clinica;
+
+    document.title = `${c.clinica} · Gestión Clínica`;
+    ['brand-favicon', 'brand-apple-icon'].forEach((id) => {
+      const link = document.getElementById(id);
+      if (link) link.href = logo;
+    });
+
+    return c;
+  }
+
   /** Chip del usuario en la cabecera (sustituye al antiguo switch de rol). */
   function pintarUsuario() {
     const cont = document.getElementById('user-chip');
@@ -352,6 +389,15 @@
               </div>
             </div>`}
 
+          ${esFisio ? `
+            <button data-action="abrir-clinica" class="flex w-full items-center gap-3 rounded-xl border border-ink-200 p-3 text-left active:bg-ink-50">
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-100 text-brand-700">${icon('image', 'h-4 w-4')}</span>
+              <span class="min-w-0">
+                <span class="block text-[13.5px] font-bold text-ink-800">Personalizar clínica</span>
+                <span class="block text-[11.5px] leading-snug text-ink-500">Logo, nombre, lema y precio de sesión</span>
+              </span>
+            </button>` : ''}
+
           <button data-action="cerrar-sesion" class="flex w-full items-center gap-3 rounded-xl border border-rose-200 p-3 text-left active:bg-rose-50">
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-rose-100 text-rose-600">${icon('logout', 'h-4 w-4')}</span>
             <span class="text-[13.5px] font-bold text-rose-600">Cerrar sesión</span>
@@ -368,6 +414,7 @@
   const ACCIONES = {
     /* --- sesión y navegación --- */
     'abrir-cuenta':  () => sheetCuenta(),
+    'abrir-clinica': () => VistaFisio.sheetClinica(),
     'cerrar-sesion': () => salir(),
     'ir-inicio':     () => { location.hash = INICIO[rol()] || ''; render(); },
     'volver':        async (el) => {
@@ -545,9 +592,19 @@
 
     estado.sesion = await API.auth.sesion();
 
+    // La marca va DESPUÉS de resolver la sesión, y antes de pintar nada: así
+    // una sola lectura trae ya todas las columnas a las que se tiene derecho,
+    // y no se ve el logo por defecto seguido de un salto al de la clínica.
+    // Si falla, se queda el de assets/ y la aplicación sigue.
+    await aplicarMarca().catch((e) => console.warn('[CLIDANFI] Marca no aplicada:', e.message));
+
     if (autenticado() && !location.hash) location.hash = INICIO[rol()];
     render();
   });
 
-  global.App = { render, entrar, salir, get rol() { return rol(); }, get sesion() { return estado.sesion; } };
+  global.App = {
+    render, entrar, salir, aplicarMarca,
+    get rol() { return rol(); },
+    get sesion() { return estado.sesion; }
+  };
 })(window);
