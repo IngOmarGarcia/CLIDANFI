@@ -88,8 +88,15 @@ create table if not exists pacientes (
   paquete_usadas  int  not null default 0,
   paquete_vence   timestamptz,
   activo          boolean not null default true,
+  -- Alta exprés: la persona se agendó dando solo nombre y teléfono y su
+  -- historia clínica está por levantar. Sirve para que la ficha avise.
+  expediente_pendiente boolean not null default false,
   creado_en       timestamptz not null default now()
 );
+
+-- Para bases creadas antes de la agenda sin registro previo.
+alter table pacientes
+  add column if not exists expediente_pendiente boolean not null default false;
 
 create index if not exists idx_pacientes_usuario on pacientes(usuario_id);
 
@@ -110,11 +117,34 @@ create table if not exists citas (
   motivo        text default 'Sesión de rehabilitación',
   estado        estado_cita not null default 'agendada',
   notas         text default '',
+  -- Precio pactado para ESTA cita. Null = se cobra el precio de la clínica
+  -- (`configuracion.precio_sesion`). Permite promociones o tarifas puntuales
+  -- sin tocar la configuración global.
+  precio        numeric(10,2),
+  -- Trazabilidad de la cancelación: quién no vino y por qué.
+  cancelada_en       timestamptz,
+  motivo_cancelacion text default '',
   creado_en     timestamptz not null default now()
 );
 
+-- Para bases anteriores al precio por cita y a la cancelación con motivo.
+alter table citas add column if not exists precio numeric(10,2);
+alter table citas add column if not exists cancelada_en timestamptz;
+alter table citas add column if not exists motivo_cancelacion text default '';
+
+-- El precio nunca es negativo (ni en la agenda ni en el cobro que genera).
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'citas_precio_no_negativo') then
+    alter table citas add constraint citas_precio_no_negativo check (precio is null or precio >= 0);
+  end if;
+end $$;
+
 create index if not exists idx_citas_inicia   on citas(inicia_en);
 create index if not exists idx_citas_paciente on citas(paciente_id, inicia_en desc);
+
+-- Ocupación de la agenda: solo estorban las citas vivas. Al cancelar una, su
+-- hueco vuelve a quedar libre sin borrar el registro histórico.
+create index if not exists idx_citas_agendadas on citas(inicia_en) where estado = 'agendada';
 
 -- ============================================================================
 -- 4 · ASISTENCIAS · el corazón del sistema
@@ -144,6 +174,14 @@ create table if not exists pagos (
 );
 
 create index if not exists idx_pagos_fecha on pagos(pagado_en desc);
+
+-- Un cobro negativo siempre es un dedazo: la gráfica de ingresos y el ticket
+-- promedio quedarían mal para siempre. Se corta en la base, no solo en la UI.
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'pagos_monto_no_negativo') then
+    alter table pagos add constraint pagos_monto_no_negativo check (monto >= 0);
+  end if;
+end $$;
 
 -- ============================================================================
 -- 6 · VALORACIÓN INICIAL DINÁMICA
@@ -176,6 +214,32 @@ create table if not exists notas (
 );
 
 create index if not exists idx_notas_paciente on notas(paciente_id, creado_en desc);
+
+-- ----------------------------------------------------------------------------
+-- 7 bis · ARCHIVOS DEL EXPEDIENTE  (imágenes y PDF sueltos)
+--
+--   Las `notas.adjuntos` son evidencias de UNA sesión y viven dentro de su
+--   nota. Esto es lo otro: la radiografía, la resonancia, el informe del
+--   traumatólogo o el consentimiento firmado, que pertenecen al expediente
+--   entero y no a una sesión concreta.
+--
+--   El binario va al bucket `expedientes` (privado); aquí solo queda la ruta.
+--   La URL NO se guarda: se firma en cada lectura y caduca, así que un enlace
+--   filtrado deja de servir solo.
+-- ----------------------------------------------------------------------------
+create table if not exists archivos (
+  id           uuid primary key default gen_random_uuid(),
+  paciente_id  uuid not null references pacientes(id) on delete cascade,
+  titulo       text not null default 'Archivo',
+  ruta         text not null,                    -- objeto en storage: <paciente>/<uid>.<ext>
+  mime         text not null default 'application/octet-stream',
+  tamano       bigint not null default 0,        -- bytes
+  categoria    text not null default 'Estudio',  -- Estudio · Informe · Consentimiento · Otro
+  nota         text default '',
+  creado_en    timestamptz not null default now()
+);
+
+create index if not exists idx_archivos_paciente on archivos(paciente_id, creado_en desc);
 
 -- ============================================================================
 -- 8 · CATÁLOGO DE EJERCICIOS + RUTINAS
@@ -287,6 +351,25 @@ create table if not exists boletos (
 create index if not exists idx_boletos_sorteo   on boletos(sorteo_id);
 create index if not exists idx_boletos_paciente on boletos(paciente_id, sorteo_id);
 
+-- ----------------------------------------------------------------------------
+-- PARTICIPANTES EXCLUIDOS
+--
+--   Sacar a alguien de una rifa no puede ser «borrar sus boletos»: los boletos
+--   se emiten solos con cada asistencia y `sincronizar_boletos` los repone en
+--   cuanto se vuelve a guardar el sorteo, así que volvería a entrar sin que
+--   nadie lo pidiera. La exclusión tiene que ser un hecho aparte, y es esta
+--   tabla la que consultan el trigger y la sincronización.
+--
+--   Es reversible: al readmitir se borra la fila y los boletos se reponen.
+-- ----------------------------------------------------------------------------
+create table if not exists sorteo_excluidos (
+  sorteo_id    uuid not null references sorteos(id) on delete cascade,
+  paciente_id  uuid not null references pacientes(id) on delete cascade,
+  motivo       text default '',
+  creado_en    timestamptz not null default now(),
+  primary key (sorteo_id, paciente_id)
+);
+
 create or replace function generar_codigo_boleto()
 returns text language plpgsql as $$
 declare letras text := 'ABCDEFGHJKLMNPQRSTUVWXYZ'; res text := '';
@@ -309,6 +392,9 @@ begin
     from sorteos s
    where s.estado = 'activo'
      and new.asistio_en between s.inicia_en and s.termina_en
+     -- a quien se sacó de la rifa no se le vuelven a emitir boletos
+     and not exists (select 1 from sorteo_excluidos x
+                      where x.sorteo_id = s.id and x.paciente_id = new.paciente_id)
   on conflict (sorteo_id, asistencia_id) do nothing;
 
   update pacientes
@@ -341,10 +427,13 @@ begin
     select s.id, a.paciente_id, a.id, generar_codigo_boleto(), a.asistio_en
       from asistencias a
      where a.asistio_en between s.inicia_en and s.termina_en
+       and not exists (select 1 from sorteo_excluidos x
+                        where x.sorteo_id = s.id and x.paciente_id = a.paciente_id)
     on conflict (sorteo_id, asistencia_id) do nothing
     returning 1
   ) select count(*)::int into v_creados from ins;
 
+  -- Fuera de fecha…
   with del as (
     delete from boletos b
      using asistencias a
@@ -353,6 +442,17 @@ begin
        and a.asistio_en not between s.inicia_en and s.termina_en
     returning 1
   ) select count(*)::int into v_eliminados from del;
+
+  -- …y fuera de la rifa. Sin esto, excluir a alguien duraría hasta el
+  -- siguiente guardado del sorteo.
+  with del2 as (
+    delete from boletos b
+     using sorteo_excluidos x
+     where b.sorteo_id = s.id
+       and x.sorteo_id = s.id
+       and x.paciente_id = b.paciente_id
+    returning 1
+  ) select v_eliminados + count(*)::int into v_eliminados from del2;
 
   return query select v_creados, v_eliminados;
 end $$;
@@ -439,6 +539,8 @@ alter table rutina_items enable row level security;
 alter table promociones  enable row level security;
 alter table sorteos      enable row level security;
 alter table boletos      enable row level security;
+alter table archivos     enable row level security;
+alter table sorteo_excluidos enable row level security;
 
 -- ---- Perfiles --------------------------------------------------------------
 drop policy if exists perfil_propio on perfiles;
@@ -453,7 +555,7 @@ declare t text;
 begin
   foreach t in array array['pacientes','citas','asistencias','pagos','valoraciones',
                            'notas','ejercicios','rutinas','rutina_items','promociones',
-                           'sorteos','boletos']
+                           'sorteos','boletos','archivos','sorteo_excluidos']
   loop
     execute format('drop policy if exists fisio_total on %I;', t);
     execute format(
@@ -508,6 +610,13 @@ drop policy if exists pac_ve_sus_pagos on pagos;
 create policy pac_ve_sus_pagos on pagos for select to authenticated
   using (es_mi_expediente(paciente_id));
 
+-- El paciente ve QUÉ hay en su expediente (nombre, tipo, fecha). Abrirlo es
+-- otra cosa: el binario vive en un bucket privado que solo lee el fisio, así
+-- que aquí no se filtra nada que no sea el índice de sus propios estudios.
+drop policy if exists pac_ve_sus_archivos on archivos;
+create policy pac_ve_sus_archivos on archivos for select to authenticated
+  using (es_mi_expediente(paciente_id));
+
 -- ---- Contenido común -------------------------------------------------------
 drop policy if exists todos_ven_ejercicios on ejercicios;
 create policy todos_ven_ejercicios on ejercicios for select to authenticated using (activo);
@@ -530,6 +639,7 @@ create policy todos_ven_sorteos on sorteos for select to authenticated using (pu
 -- ============================================================================
 insert into storage.buckets (id, name, public)
 values ('evidencias', 'evidencias', false),
+       ('expedientes', 'expedientes', false),
        ('ejercicios', 'ejercicios', true)
 on conflict (id) do nothing;
 
@@ -548,6 +658,34 @@ create policy "fisio borra evidencias" on storage.objects for delete
 drop policy if exists "todos leen ejercicios" on storage.objects;
 create policy "todos leen ejercicios" on storage.objects for select
   using (bucket_id = 'ejercicios');
+
+-- ---- Archivos del expediente (radiografías, informes, PDF) -----------------
+-- Bucket privado: se lee siempre por URL firmada y con caducidad, nunca por
+-- URL pública. El límite de tamaño y los tipos se imponen aquí además de en la
+-- interfaz, para que no dependan del JavaScript.
+do $$ begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'storage' and table_name = 'buckets'
+                and column_name = 'allowed_mime_types') then
+    update storage.buckets
+       set file_size_limit = 20971520,   -- 20 MB
+           allowed_mime_types = array['image/jpeg','image/png','image/webp',
+                                      'image/heic','image/heif','application/pdf']
+     where id = 'expedientes';
+  end if;
+end $$;
+
+drop policy if exists "fisio sube expedientes" on storage.objects;
+create policy "fisio sube expedientes" on storage.objects for insert
+  to authenticated with check (bucket_id = 'expedientes' and es_fisio());
+
+drop policy if exists "fisio lee expedientes" on storage.objects;
+create policy "fisio lee expedientes" on storage.objects for select
+  to authenticated using (bucket_id = 'expedientes' and es_fisio());
+
+drop policy if exists "fisio borra expedientes" on storage.objects;
+create policy "fisio borra expedientes" on storage.objects for delete
+  to authenticated using (bucket_id = 'expedientes' and es_fisio());
 
 -- ============================================================================
 -- 15 · CATÁLOGO DE EJERCICIOS

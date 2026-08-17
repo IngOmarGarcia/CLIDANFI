@@ -44,6 +44,14 @@ En **SQL Editor → New query → Run**, ejecuta en este orden:
 
 Ambos son idempotentes.
 
+> **Si ya tenías la base montada, vuelve a ejecutar `supabase/schema.sql` completo.**
+> Es idempotente y no borra datos: las columnas nuevas se añaden con `add column if not
+> exists`. Sin ese paso faltarán el precio por cita, el motivo de cancelación, la marca de
+> historial pendiente, la tabla `archivos`, la tabla `sorteo_excluidos` y el bucket
+> `expedientes`. La aplicación **no se rompe** sin ellos —degrada y lo avisa en el
+> dashboard—, pero esas funciones quedan a medias: en concreto, un participante excluido de
+> una rifa volvería a entrar al guardar el sorteo.
+
 ### Cuentas
 
 En **Authentication → Users → Add user** (marca *Auto Confirm User*):
@@ -232,6 +240,9 @@ CLIDANFI/
 │   └── app.js                 Router + guardia de sesión
 ├── scripts/
 │   ├── check-schema.js        Cruza js/api.js con schema.sql (caza los 404)
+│   ├── test-esquema.js        Regresión: detección de esquema desactualizado
+│   ├── test-subidas.js        Regresión: subidas de imagen bajo la CSP
+│   ├── test-funciones.js      Regresión: importes, agenda, archivos, exclusiones
 │   ├── generate-env.js        Variables de entorno → js/env.js (con validación)
 │   ├── vendor.js              Copia el cliente de Supabase
 │   └── build.js               Build completo → dist/
@@ -253,14 +264,17 @@ cliente se crea una sola vez en `supabase-client.js`.
 | Módulo | Qué hace |
 |---|---|
 | **Dashboard** | Ingresos de la semana con gráfica por día, comparativo, ticket promedio, KPIs y agenda de hoy. |
-| **Agenda** | Citas de hoy / próximos 21 días. Registrar asistencia, reagendar, marcar "no asistió" o eliminar. |
+| **Agenda** | Citas de hoy / próximos 21 días. Registrar asistencia, reagendar, marcar "no asistió", **cancelar liberando el horario** o eliminar. Avisa si el hueco pisa otra cita. |
+| **Agendar** | Con paciente registrado o **con uno nuevo dando solo nombre y teléfono**. Precio propio por cita. |
+| **WhatsApp** | Recordatorios y avisos con el mensaje ya redactado: por cita, por paciente, en tanda para los próximos días y al responder solicitudes. |
 | **Pacientes** | Lista **ordenada por fecha de última asistencia**. Buscador que ignora acentos. |
 | **Ficha** | Resumen · Valoración · Historial · Rutinas. |
 | **Valoración inicial** | **13 secciones activables con switch** según la dolencia, sobre un motor de 9 tipos de campo. |
-| **Historial** | Línea de tiempo con EVA y captura de fotos desde la cámara, comprimidas antes de subirse. |
+| **Historial** | Línea de tiempo con EVA, fotos desde la cámara y **archivos del expediente (imágenes y PDF)**. |
 | **Rutinas** | Catálogo visual de 22 ejercicios. Cada guardado crea una versión **activa y arriba**; el resto es histórico. |
-| **Sorteos** | Crear sorteo, **1 boleto automático por asistencia**, participantes, sorteo animado y publicación controlada del ganador. |
+| **Sorteos** | Crear sorteo, **1 boleto automático por asistencia**, participantes, **excluir y readmitir**, sorteo animado y publicación controlada del ganador. |
 | **Promociones** | Alta, listado y baja con vigencia. |
+| **Cobros** | Precio de la clínica en *Personalizar clínica*, precio pactado por cita, y ambos validados antes de tocar la base. |
 
 Todos los botones de guardar y editar están siempre operativos; los errores del servidor se
 muestran como aviso en pantalla, incluidos los de permisos. En **Mi cuenta** se confirma si
@@ -303,6 +317,71 @@ en el formulario hasta que pulsas **Guardar**. Ese botón:
 - muestra el resultado bajo el propio botón: verde con el detalle si fue bien, o el **motivo real
   del error** del servidor si falló, **sin salir de la pantalla** para no perder lo capturado;
 - avisa si intentas salir con cambios pendientes (al volver, al navegar y al cerrar la pestaña).
+
+### Recordatorios por WhatsApp
+
+No hay integración con la API de negocio de WhatsApp: es de pago y exige un servidor propio.
+Lo que hay es lo que funciona en cualquier teléfono desde el primer día — **enlaces `wa.me`
+con el mensaje ya escrito**, que abren la conversación del paciente lista para enviar.
+
+- El teléfono se normaliza a formato internacional (`telWhatsApp` en `js/ui.js`): acepta
+  `667 123 4567`, `(667)123-4567`, `+52 667 123 4567` o el viejo `044…`, y devuelve vacío
+  —sin generar enlace roto— si el número no da para más.
+- El texto se puede **editar antes de enviar**, y también copiarse como enlace para quien
+  atiende el teléfono desde otro dispositivo.
+- Hay plantilla de recordatorio, de confirmación al agendar, de aviso de cancelación, de
+  seguimiento y de respuesta a una solicitud de cita.
+- **El envío siempre lo confirma una persona.** Es lo que evita que salga un recordatorio a
+  quien acaba de cancelar.
+
+Desde *Agenda → Recordatorios por WhatsApp* se despachan en tanda las citas de los próximos
+días, marcando cuáles no tienen teléfono utilizable.
+
+### Cancelar no es borrar
+
+Son dos acciones distintas y la diferencia importa:
+
+- **Cancelar** cambia el estatus a `cancelada`, guarda el motivo y la hora, y **libera el
+  horario**: la ocupación de la agenda solo cuenta las citas en estado `agendada`. El registro
+  se conserva en el historial del paciente y se ofrece avisarle por WhatsApp.
+- **Eliminar** la borra del historial y no deja rastro de que ese hueco existió.
+
+### Agendar sin registro previo
+
+Cuando alguien llama para pedir hora y no está en el sistema, *Agendar cita → Paciente nuevo*
+crea el expediente con **nombre y teléfono**, nada más. Ese expediente nace marcado con
+`expediente_pendiente`, así que:
+
+- aparece con la etiqueta *Historial pendiente* en la lista de pacientes;
+- su ficha muestra un aviso en todas las pestañas hasta completarlo;
+- no se le inventa un paquete de sesiones contratado (`paquete_total = 0`), que descuadraría
+  el conteo.
+
+La marca se retira al guardar la ficha completa o con *Ya está al día*.
+
+### Archivos del expediente
+
+Las fotos de una nota son evidencias de **esa sesión**. Los archivos del expediente son otra
+cosa: la radiografía, la resonancia, el informe del traumatólogo o el consentimiento firmado,
+que pertenecen al expediente entero.
+
+- Se admiten **imágenes y PDF hasta 20 MB**, y suben **tal cual** —sin recomprimir— porque un
+  PDF no sobrevive a la conversión y una radiografía recomprimida pierde el detalle por el que
+  se guarda.
+- Van al bucket privado `expedientes`. **La URL no se almacena**: se firma en cada lectura y
+  caduca, así que un enlace que se escape deja de servir solo.
+- Si falla el registro en la tabla, el binario recién subido se retira del bucket.
+
+### Excluir a alguien de una rifa
+
+Quitar a un participante **no puede ser borrarle los boletos**: se emiten solos con cada
+asistencia y `sincronizar_boletos` los repondría en el siguiente guardado del sorteo. Por eso
+la exclusión se guarda como un hecho aparte, en la tabla `sorteo_excluidos`, que consultan
+tanto el trigger de emisión como la sincronización.
+
+Es reversible: al **readmitir** se borra la exclusión y se reponen los boletos de todas sus
+asistencias dentro del periodo. Con el ganador ya elegido la lista pasa a solo lectura, porque
+a esas alturas quitar gente no cambiaría el resultado.
 
 ### La cascada que amarra todo
 
@@ -347,3 +426,8 @@ volver a ejecutar `supabase/schema.sql`.
   `prefers-reduced-motion` respetado.
 - Las fotos de evidencias se comprimen en el navegador (máx. 900 px, JPEG 72 %) y van al
   bucket privado `evidencias` con URL firmada.
+- Los archivos del expediente (bucket privado `expedientes`) **no** se comprimen ni se
+  convierten: un PDF no sobrevive a eso. El límite de 20 MB y los tipos admitidos se imponen
+  en el cliente **y** en el propio bucket, para que no dependan del JavaScript.
+- Los enlaces de WhatsApp son `wa.me` con el texto codificado; no hay integración con la API
+  de negocio ni, por tanto, servidor intermedio que custodiar.

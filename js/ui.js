@@ -78,6 +78,49 @@
   const uid = (prefix = 'id') =>
     `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
+  /* ------------------------------------------------------------ Teléfonos */
+
+  /* Lada por defecto: México. La app se vende a clínicas mexicanas, y quien
+     captura un teléfono escribe los 10 dígitos de siempre, sin país. */
+  const LADA_POR_DEFECTO = '52';
+
+  /**
+   * Deja un teléfono en el formato que exige wa.me: solo dígitos, con país y
+   * sin el «+».
+   *
+   * Acepta lo que la gente escribe de verdad: «667 123 4567», «(667)1234567»,
+   * «+52 667 123 4567», «04491234567». Devuelve '' si no hay nada aprovechable,
+   * y quien llama debe tratar ese '' como «este paciente no tiene WhatsApp»
+   * en vez de generar un enlace roto.
+   */
+  const telWhatsApp = (tel, lada = LADA_POR_DEFECTO) => {
+    // Los ceros de cabecera son prefijos de marcación (00 internacional, 044 y
+    // 045 de la vieja numeración móvil), nunca parte del número.
+    const d = String(tel ?? '').replace(/\D+/g, '').replace(/^0+/, '');
+    if (!d) return '';
+    const conPais = d.length === 10 ? lada + d : d;   // 10 dígitos = nacional
+    return conPais.length >= 10 && conPais.length <= 15 ? conPais : '';  // E.164
+  };
+
+  /**
+   * Enlace de WhatsApp con el mensaje ya escrito. Abre la aplicación en el
+   * móvil y WhatsApp Web en el escritorio, sin API de pago ni servidor.
+   * Devuelve '' si el teléfono no sirve.
+   */
+  const waLink = (tel, mensaje = '') => {
+    const n = telWhatsApp(tel);
+    if (!n) return '';
+    return `https://wa.me/${n}${mensaje ? `?text=${encodeURIComponent(mensaje)}` : ''}`;
+  };
+
+  /** Tamaño de archivo legible: 940 KB, 2.4 MB. */
+  const fmtBytes = (n) => {
+    const b = Number(n) || 0;
+    if (b < 1024) return `${b} B`;
+    if (b < 1048576) return `${Math.round(b / 1024)} KB`;
+    return `${(b / 1048576).toFixed(1)} MB`;
+  };
+
   /** Código de boleto legible: ABC-1234 */
   const ticketCode = () => {
     const L = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -133,7 +176,16 @@
     eye:         'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     eyeOff:      'M10.6 6.2A9.9 9.9 0 0 1 12 6c6.4 0 10 6 10 6a18.4 18.4 0 0 1-3 3.6M6.2 6.2A18.3 18.3 0 0 0 2 12s3.6 6 10 6a9.8 9.8 0 0 0 4-.8M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2',
     lock:        'M6 10.5h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1zM8 10.5V7a4 4 0 0 1 8 0v3.5',
-    shield:      'M12 22s8-3.5 8-10V5.5l-8-3-8 3V12c0 6.5 8 10 8 10zM9.2 12l2 2 3.6-4'
+    shield:      'M12 22s8-3.5 8-10V5.5l-8-3-8 3V12c0 6.5 8 10 8 10zM9.2 12l2 2 3.6-4',
+    // Globo de conversación con el auricular dentro: la silueta de WhatsApp
+    // trazada a línea, para que combine con el resto del juego de iconos.
+    whatsapp:    'M20.5 11.6a8.4 8.4 0 0 1-12.4 7.4L3.5 20.5l1.5-4.5A8.4 8.4 0 1 1 20.5 11.6zM9.3 8.1c.15-.35.35-.4.6-.4h.5c.2 0 .4.05.6.45l.6 1.45c.1.25 0 .45-.1.6l-.35.45c-.15.2-.25.35-.1.6a5.6 5.6 0 0 0 2.7 2.35c.25.1.45.05.6-.15l.45-.5c.15-.2.35-.2.55-.1l1.45.7c.25.15.35.25.35.45 0 .7-.55 1.45-.9 1.6-.4.15-.9.25-1.5.15a8.8 8.8 0 0 1-5.95-5.7c-.15-.8-.05-1.55.2-2z',
+    userPlus:    'M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 7.5v6M22 10.5h-6',
+    file:        'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13.5h6M9 17h4',
+    upload:      'M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3M12 3.5v12M7.5 8 12 3.5 16.5 8',
+    download:    'M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3M12 15.5v-12M7.5 11 12 15.5 16.5 11',
+    ban:         'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM4.9 4.9l14.2 14.2',
+    calendarX:   'M8 2v4M16 2v4M3.5 9.5h17M5 4.5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-14a1 1 0 0 1 1-1zM9.8 13.3l4.4 4.4M14.2 13.3l-4.4 4.4'
   };
 
   /** Devuelve un <svg> inline. `cls` controla tamaño/color con Tailwind. */
@@ -391,6 +443,7 @@
   /* ------------------------------------------------------------- Exports   */
   global.UI = {
     escapeHtml, normalize, initials, uid, ticketCode,
+    telWhatsApp, waLink, fmtBytes,
     toDate, startOfDay, startOfWeek, addDays, isoDay, sameDay, toLocalInput,
     fmtTime, fmtDate, fmtDateLong, fmtDateTime, relDay, fmtMoney, fmtMoneyShort,
     icon, ICONS, placeholderImage, readImageCompressed,

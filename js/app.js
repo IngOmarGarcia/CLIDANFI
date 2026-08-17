@@ -428,18 +428,42 @@
     'limpiar-busqueda': () => { const i = document.getElementById('buscador-pacientes'); if (i) { i.value = ''; i.dispatchEvent(new Event('input')); } },
 
     /* --- agenda --- */
-    'nueva-cita': (el) => VistaFisio.sheetCita(el.dataset.id || null),
-    'cita-menu':  (el) => VistaFisio.sheetMenuCita(el.dataset.id),
+    'nueva-cita':        (el) => VistaFisio.sheetCita(el.dataset.id || null),
+    'cita-menu':         (el) => VistaFisio.sheetMenuCita(el.dataset.id),
+    'cancelar-cita':     (el) => VistaFisio.sheetCancelarCita(el.dataset.id),
+
+    /* --- WhatsApp --- */
+    'ver-recordatorios': () => VistaFisio.sheetRecordatorios(),
+    'whatsapp-cita':     (el) => VistaFisio.whatsappCita(el.dataset.id, el.dataset.plantilla || 'recordatorio'),
+    'whatsapp-paciente': (el) => VistaFisio.whatsappPaciente(el.dataset.id),
 
     /* --- clínico --- */
     'registrar-asistencia': (el) => VistaFisio.sheetAsistencia(el.dataset.id),
     'abrir-valoracion':     (el) => { location.hash = `#/t/valoracion/${el.dataset.id}`; },
     'nueva-nota':           (el) => VistaFisio.sheetNota(el.dataset.id),
     'ver-foto':             (el) => VistaFisio.sheetFoto(el.dataset.url, el.dataset.titulo),
+    'ver-archivo':          (el) => VistaFisio.verArchivo(el.dataset.id),
 
     'borrar-nota': async (el) => {
       const ok = await confirmSheet({ title: 'Eliminar nota', message: '¿Eliminar esta nota de evolución y sus adjuntos?', confirmText: 'Eliminar', tone: 'danger' });
       if (ok) { await API.eliminarNota(el.dataset.id); toast('Nota eliminada'); render(); }
+    },
+
+    'borrar-archivo': async (el) => {
+      const ok = await confirmSheet({
+        title: 'Eliminar archivo',
+        message: 'Se borra del expediente y del almacenamiento. Esta acción no se puede deshacer.',
+        confirmText: 'Eliminar', tone: 'danger'
+      });
+      if (ok) { await API.eliminarArchivo(el.dataset.id); toast('Archivo eliminado'); render(); }
+    },
+
+    /* El alta exprés deja el historial pendiente y la ficha lo reclama hasta
+       que alguien dice que ya está completo. */
+    'expediente-al-dia': async (el) => {
+      await API.actualizarPaciente(el.dataset.id, { expediente_pendiente: false });
+      toast('Expediente marcado como completo');
+      render();
     },
 
     /* Guardado explícito de la valoración: recoge TODOS los campos del

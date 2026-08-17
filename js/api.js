@@ -163,6 +163,49 @@
     return res;
   };
 
+  /**
+   * Escribe tolerando que la base todavía no tenga las columnas más nuevas.
+   *
+   * Las funciones añadidas después del primer despliegue (precio por cita,
+   * expediente exprés, motivo de cancelación) traen columnas nuevas. Si el
+   * proyecto de Supabase no ha corrido el schema.sql actualizado, PostgREST
+   * responde 42703/PGRST204 y la operación ENTERA se perdería —incluida la
+   * parte que sí cabía—. Aquí se reintenta sin las columnas opcionales: la
+   * cita se agenda igual, solo sin su precio, y se avisa por consola.
+   *
+   * @param {(fila:object) => Promise} ejecutar   consulta ya construida
+   * @param {object}   fila         datos completos
+   * @param {string[]} opcionales   columnas que se pueden sacrificar
+   */
+  const _escrituraTolerante = async (ejecutar, fila, opcionales) => {
+    const res = await ejecutar(fila);
+    if (!res || !res.error || !_esColumna(res.error)) return ok(res);
+
+    const podada = { ...fila };
+    const quitadas = opcionales.filter((c) => c in podada);
+    quitadas.forEach((c) => { delete podada[c]; });
+    if (!quitadas.length) return ok(res);
+
+    console.warn(`[CLIDANFI] Tu base no tiene todavía ${quitadas.join(', ')}. ` +
+      'Se guarda sin ese dato; ejecuta supabase/schema.sql para habilitarlo.');
+    return ok(await ejecutar(podada));
+  };
+
+  /**
+   * Valida un importe antes de que salga a la red.
+   * Un `Number('abc')` da NaN y PostgREST lo rechazaría con un error opaco;
+   * un negativo entraría tan campante y dejaría torcida la gráfica de ingresos.
+   */
+  const _importe = (valor, campo = 'El monto') => {
+    if (valor === '' || valor === null || valor === undefined) {
+      throw new Error(`${campo} es obligatorio.`);
+    }
+    const n = Number(valor);
+    if (!Number.isFinite(n)) throw new Error(`${campo} debe ser una cantidad válida.`);
+    if (n < 0) throw new Error(`${campo} no puede ser negativo.`);
+    return Math.round(n * 100) / 100;
+  };
+
   /* --- Verificación activa del esquema ----------------------------------
      El panel ya no se fía del historial de errores acumulado: pregunta.
      La distinción que importa es la que antes no se hacía:
@@ -419,6 +462,10 @@
     const fila = { id: 1, actualizado_en: new Date().toISOString() };
     for (const k of CFG_CAMPOS) if (k in (patch || {})) fila[k] = patch[k];
 
+    // El precio de sesión es la tarifa que luego se propone en cada cobro:
+    // si entra en blanco o negativo, contamina todos los cobros posteriores.
+    if ('precio_sesion' in fila) fila.precio_sesion = _importe(fila.precio_sesion, 'El precio de sesión');
+
     _guardarEnCache(ok(await sb.from('configuracion').upsert(fila).select(CFG_COLS_TODAS).single()));
     _cfgCompleta = true;
     return getConfig();
@@ -512,10 +559,36 @@
   };
 
   const crearPaciente = async (data) =>
-    ok(await sb.from('pacientes').insert(data).select().single());
+    _escrituraTolerante((fila) => sb.from('pacientes').insert(fila).select().single(),
+      data, ['expediente_pendiente']);
+
+  /**
+   * Alta exprés: la persona llega sin expediente y solo se le pide nombre y
+   * teléfono para poder agendarla. La historia clínica queda marcada como
+   * pendiente para que la ficha lo reclame después.
+   *
+   * No inventa paquete de sesiones (`paquete_total: 0`): cobrar por adelantado
+   * un paquete que nadie ha contratado descuadraría el conteo de boletos.
+   */
+  const crearPacienteExpres = async ({ nombre, telefono = '', email = '', motivo = '' }) => {
+    const limpio = String(nombre || '').trim();
+    if (!limpio) throw new Error('Escribe al menos el nombre del paciente.');
+
+    return crearPaciente({
+      nombre: limpio,
+      telefono: String(telefono || '').trim(),
+      email: String(email || '').trim(),
+      diagnostico: String(motivo || '').trim(),
+      paquete_nombre: 'Sesión individual',
+      paquete_total: 0,
+      paquete_usadas: 0,
+      expediente_pendiente: true
+    });
+  };
 
   const actualizarPaciente = async (id, patch) =>
-    ok(await sb.from('pacientes').update(patch).eq('id', id).select().single());
+    _escrituraTolerante((fila) => sb.from('pacientes').update(fila).eq('id', id).select().single(),
+      patch, ['expediente_pendiente']);
 
   const eliminarPaciente = async (id) => {
     ok(await sb.from('pacientes').delete().eq('id', id));  // cascada por FK
@@ -556,9 +629,85 @@
     return { ...c, paciente_nombre: p.nombre };
   };
 
-  const crearCita = async (data) => ok(await sb.from('citas').insert(data).select().single());
-  const actualizarCita = async (id, patch) => ok(await sb.from('citas').update(patch).eq('id', id).select().single());
+  /* Columnas que pueden faltar si la base no está al día. Se sacrifican antes
+     que perder la cita entera (ver `_escrituraTolerante`). */
+  const CITA_COLS_NUEVAS = ['precio', 'cancelada_en', 'motivo_cancelacion'];
+
+  const _normalizarCita = (data) => {
+    const fila = { ...data };
+    // Precio vacío = «la tarifa de la clínica», y eso se escribe null, no 0:
+    // un 0 significaría sesión gratuita y así se cobraría.
+    if ('precio' in fila) {
+      fila.precio = (fila.precio === '' || fila.precio === null || fila.precio === undefined)
+        ? null
+        : _importe(fila.precio, 'El precio de la cita');
+    }
+    return fila;
+  };
+
+  const crearCita = async (data) =>
+    _escrituraTolerante((fila) => sb.from('citas').insert(fila).select().single(),
+      _normalizarCita(data), CITA_COLS_NUEVAS);
+
+  const actualizarCita = async (id, patch) =>
+    _escrituraTolerante((fila) => sb.from('citas').update(fila).eq('id', id).select().single(),
+      _normalizarCita(patch), CITA_COLS_NUEVAS);
+
   const eliminarCita = async (id) => { ok(await sb.from('citas').delete().eq('id', id)); return true; };
+
+  /**
+   * Cancela una cita SIN borrarla.
+   *
+   * La diferencia con `eliminarCita` importa: eliminar la hace desaparecer del
+   * historial —y con ella el rastro de que ese hueco existió—, mientras que
+   * cancelar deja constancia de quién falló y por qué. En ambos casos el
+   * horario queda libre, porque la ocupación de la agenda solo cuenta las
+   * citas en estado 'agendada' (ver `conflictosDeAgenda`).
+   */
+  const cancelarCita = async (id, { motivo = '', avisado = false } = {}) => {
+    const nota = String(motivo || '').trim();
+    return actualizarCita(id, {
+      estado: 'cancelada',
+      cancelada_en: new Date().toISOString(),
+      motivo_cancelacion: avisado && nota ? `${nota} (avisó por WhatsApp)` : nota
+    });
+  };
+
+  /** Devuelve una cita concreta con el nombre de su paciente ya resuelto. */
+  const obtenerCita = async (id) => {
+    const rows = ok(await sb.from('citas').select(SELECT_CITA).eq('id', id).limit(1));
+    return rows.length ? _conNombre(rows)[0] : null;
+  };
+
+  /**
+   * Citas VIVAS que pisan el hueco indicado.
+   *
+   * Se traen las cercanas y el solapamiento se calcula aquí porque la duración
+   * es una columna aparte y PostgREST no sabe sumar minutos en el filtro. El
+   * margen de 4 h cubre de sobra la cita más larga del catálogo (90 min).
+   *
+   * Solo cuentan las 'agendada': una cita cancelada o marcada como no asistida
+   * ya no ocupa nada, que es justo lo que libera el horario al cancelar.
+   */
+  const conflictosDeAgenda = async ({ inicia_en, duracion_min = 45, excluirId = null }) => {
+    const ini = new Date(inicia_en).getTime();
+    if (!Number.isFinite(ini)) return [];
+    const fin = ini + (Number(duracion_min) || 45) * 60000;
+    const margen = 4 * 60 * 60000;
+
+    const rows = ok(await sb.from('citas').select(SELECT_CITA)
+      .eq('estado', 'agendada')
+      .gte('inicia_en', new Date(ini - margen).toISOString())
+      .lte('inicia_en', new Date(fin + margen).toISOString())
+      .order('inicia_en', { ascending: true }));
+
+    return _conNombre(rows.filter((c) => {
+      if (excluirId && c.id === excluirId) return false;
+      const a = new Date(c.inicia_en).getTime();
+      const b = a + (Number(c.duracion_min) || 45) * 60000;
+      return a < fin && b > ini;              // solapamiento estricto
+    }));
+  };
 
   /* ======================================================================
      ASISTENCIAS
@@ -568,11 +717,16 @@
   const registrarAsistencia = async ({ paciente_id, cita_id = null, fecha = null, monto = null, metodo = 'Efectivo', concepto = 'Sesión de fisioterapia', nota = '' }) => {
     const asistio_en = fecha ? new Date(fecha).toISOString() : new Date().toISOString();
 
+    // El importe se valida ANTES de insertar la asistencia: si el cobro es
+    // inválido más vale no haber emitido todavía los boletos ni descontado la
+    // sesión del paquete, porque eso ya no se deshace solo.
+    const cobro = monto === null || monto === '' ? null : _importe(monto, 'El monto del cobro');
+
     const asistencia = ok(await sb.from('asistencias')
       .insert({ paciente_id, cita_id, asistio_en, nota }).select().single());
 
-    if (monto !== null && Number(monto) > 0) {
-      ok(await sb.from('pagos').insert({ paciente_id, monto: Number(monto), metodo, concepto, pagado_en: asistio_en }));
+    if (cobro !== null && cobro > 0) {
+      ok(await sb.from('pagos').insert({ paciente_id, monto: cobro, metodo, concepto, pagado_en: asistio_en }));
     }
     if (cita_id) ok(await sb.from('citas').update({ estado: 'completada' }).eq('id', cita_id));
 
@@ -591,9 +745,19 @@
      ====================================================================== */
   const registrarPago = async ({ paciente_id, monto, metodo = 'Efectivo', concepto = 'Sesión de fisioterapia', fecha = null }) =>
     ok(await sb.from('pagos').insert({
-      paciente_id, monto: Number(monto) || 0, metodo, concepto,
+      paciente_id, monto: _importe(monto, 'El monto del cobro'), metodo, concepto,
       pagado_en: fecha ? new Date(fecha).toISOString() : new Date().toISOString()
     }).select().single());
+
+  /** Corrige un cobro ya registrado (importe, método o concepto). */
+  const actualizarPago = async (id, patch) => {
+    const fila = { ...patch };
+    if ('monto' in fila) fila.monto = _importe(fila.monto, 'El monto del cobro');
+    if ('fecha' in fila) { fila.pagado_en = new Date(fila.fecha).toISOString(); delete fila.fecha; }
+    return ok(await sb.from('pagos').update(fila).eq('id', id).select().single());
+  };
+
+  const eliminarPago = async (id) => { ok(await sb.from('pagos').delete().eq('id', id)); return true; };
 
   const ingresosSemana = async (ref = new Date()) => {
     const ini = startOfWeek(ref);
@@ -677,6 +841,109 @@
   };
 
   const eliminarNota = async (id) => { ok(await sb.from('notas').delete().eq('id', id)); return true; };
+
+  /* ======================================================================
+     ARCHIVOS DEL EXPEDIENTE  ·  imágenes y PDF (bucket `expedientes`)
+
+     Se diferencian de `notas.adjuntos` en el alcance: aquello son evidencias
+     de UNA sesión; esto es documentación del expediente completo (estudios de
+     imagen, informes de otro especialista, consentimientos firmados).
+
+     A diferencia de las evidencias, aquí NO se comprime ni se convierte a
+     JPEG: un PDF no sobrevive a eso, y una radiografía recomprimida pierde
+     justo el detalle por el que se guarda. El archivo sube tal cual llegó.
+
+     La URL tampoco se persiste: el bucket es privado y cada lectura firma un
+     enlace temporal, así que un enlace que se escape caduca solo.
+     ====================================================================== */
+  const ARCHIVO_MAX_BYTES = 20 * 1024 * 1024;      // 20 MB, igual que el bucket
+  const ARCHIVO_TIPOS = [
+    'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'
+  ];
+
+  const _extensionDe = (file) => {
+    const porNombre = String(file.name || '').match(/\.([A-Za-z0-9]{1,5})$/);
+    if (porNombre) return porNombre[1].toLowerCase();
+    return file.type === 'application/pdf' ? 'pdf' : 'bin';
+  };
+
+  /** Enlace temporal al binario. `null` si el objeto ya no está en el bucket. */
+  const _urlFirmada = async (ruta, segundos = 60 * 60) => {
+    if (!ruta) return null;
+    const { data, error } = await sb.storage.from('expedientes').createSignedUrl(ruta, segundos);
+    if (error) {
+      console.warn('[CLIDANFI] No se pudo firmar el archivo', ruta, error.message);
+      return null;
+    }
+    return data.signedUrl;
+  };
+
+  /**
+   * Lista el expediente documental con un enlace firmado por archivo.
+   * Si la tabla todavía no existe, devuelve una lista vacía en vez de tumbar
+   * la ficha del paciente entera.
+   */
+  const archivosDePaciente = async (pacienteId) => {
+    const r = await opcional(
+      sb.from('archivos').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }),
+      { data: [], error: null },
+      { objeto: 'archivos' });
+
+    const rows = r.data || [];
+    return Promise.all(rows.map(async (a) => ({
+      ...a,
+      es_pdf: a.mime === 'application/pdf',
+      url: await _urlFirmada(a.ruta)
+    })));
+  };
+
+  /**
+   * Sube un File del `<input type="file">` y lo registra en el expediente.
+   * Si el registro en la tabla falla, se retira el binario recién subido: un
+   * objeto huérfano en el bucket no lo ve nadie y ocuparía espacio para nada.
+   */
+  const subirArchivo = async (pacienteId, file, { titulo = '', categoria = 'Estudio', nota = '' } = {}) => {
+    if (!file) throw new Error('No se recibió ningún archivo.');
+    if (!ARCHIVO_TIPOS.includes(file.type)) {
+      throw new Error('Formato no admitido. Sube una imagen (JPG, PNG, WEBP) o un PDF.');
+    }
+    if (file.size > ARCHIVO_MAX_BYTES) {
+      throw new Error(`«${file.name}» pesa ${(file.size / 1048576).toFixed(1)} MB y el máximo son 20 MB.`);
+    }
+
+    const ruta = `${pacienteId}/${uid('arch')}.${_extensionDe(file)}`;
+    ok(await sb.storage.from('expedientes').upload(ruta, file, { contentType: file.type, upsert: false }));
+
+    try {
+      const fila = ok(await sb.from('archivos').insert({
+        paciente_id: pacienteId,
+        titulo: String(titulo || file.name || 'Archivo').slice(0, 120),
+        ruta,
+        mime: file.type,
+        tamano: file.size,
+        categoria,
+        nota: String(nota || '')
+      }).select().single());
+      return { ...fila, es_pdf: fila.mime === 'application/pdf', url: await _urlFirmada(ruta) };
+    } catch (e) {
+      await sb.storage.from('expedientes').remove([ruta]).catch(() => {});
+      throw e;
+    }
+  };
+
+  /** Borra el registro y su binario. Primero el objeto, luego la fila. */
+  const eliminarArchivo = async (id) => {
+    const fila = ok(await sb.from('archivos').select('ruta').eq('id', id).single());
+    if (fila && fila.ruta) await sb.storage.from('expedientes').remove([fila.ruta]).catch(() => {});
+    ok(await sb.from('archivos').delete().eq('id', id));
+    return true;
+  };
+
+  /** Enlace fresco para abrir o descargar un archivo ya subido. */
+  const enlaceDeArchivo = async (id) => {
+    const fila = ok(await sb.from('archivos').select('ruta, titulo, mime').eq('id', id).single());
+    return { ...fila, url: await _urlFirmada(fila.ruta) };
+  };
 
   /* ======================================================================
      RUTINAS
@@ -808,6 +1075,70 @@
     });
     return [...map.values()].map((r) => ({ ...r, total: r.boletos.length }))
       .sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre));
+  };
+
+  /* --- Participantes excluidos ------------------------------------------
+     Sacar a alguien de la rifa NO puede ser solo borrarle los boletos: se
+     emiten con cada asistencia y `sincronizar_boletos` los repone en el
+     siguiente guardado del sorteo. La exclusión se guarda como hecho aparte
+     en `sorteo_excluidos`, que es lo que consultan el trigger y la
+     sincronización en el servidor.
+     ---------------------------------------------------------------------- */
+  const excluidosDeSorteo = async (sorteoId) => {
+    const r = await opcional(
+      sb.from('sorteo_excluidos').select('paciente_id, motivo, creado_en, pacientes(nombre)')
+        .eq('sorteo_id', sorteoId).order('creado_en', { ascending: false }),
+      { data: [], error: null },
+      { objeto: 'sorteo_excluidos', tolerarPermiso: true });
+
+    return (r.data || []).map((x) => ({
+      paciente_id: x.paciente_id,
+      nombre: (x.pacientes && x.pacientes.nombre) || '—',
+      motivo: x.motivo || '',
+      creado_en: x.creado_en
+    }));
+  };
+
+  /**
+   * Saca a un paciente de un sorteo: registra la exclusión y retira sus
+   * boletos actuales.
+   *
+   * @returns {{permanente: boolean, boletos_eliminados: number}}
+   *   `permanente:false` significa que la base todavía no tiene la tabla
+   *   `sorteo_excluidos`: los boletos se han retirado, pero volverán a
+   *   emitirse en cuanto se guarde el sorteo. Quien llama debe decirlo.
+   */
+  const excluirDeSorteo = async (sorteoId, pacienteId, { motivo = '' } = {}) => {
+    let permanente = true;
+
+    const { error } = await sb.from('sorteo_excluidos')
+      .upsert({ sorteo_id: sorteoId, paciente_id: pacienteId, motivo: String(motivo || '') },
+              { onConflict: 'sorteo_id,paciente_id' });
+
+    if (error) {
+      if (!_esFalta(error)) {
+        if (_esPermiso(error)) throw _errPermiso('sorteo_excluidos');
+        throw new Error(error.message);
+      }
+      _marcarFalta('sorteo_excluidos');
+      permanente = false;
+    } else {
+      _marcarPresente('sorteo_excluidos');
+    }
+
+    const retirados = ok(await sb.from('boletos').delete()
+      .eq('sorteo_id', sorteoId).eq('paciente_id', pacienteId).select('id'));
+
+    return { permanente, boletos_eliminados: (retirados || []).length };
+  };
+
+  /** Deshace la exclusión y repone los boletos de sus asistencias. */
+  const readmitirEnSorteo = async (sorteoId, pacienteId) => {
+    const { error } = await sb.from('sorteo_excluidos')
+      .delete().eq('sorteo_id', sorteoId).eq('paciente_id', pacienteId);
+    if (error && !_esFalta(error)) throw new Error(error.message);
+
+    return sincronizarBoletos(sorteoId);
   };
 
   const realizarSorteo = async (sorteoId) => {
@@ -970,14 +1301,18 @@
      ====================================================================== */
 
   const SOLO_FISIO = [
-    'listarPacientes', 'crearPaciente', 'actualizarPaciente', 'eliminarPaciente',
-    'citasDeHoy', 'proximasCitas', 'crearCita', 'actualizarCita', 'eliminarCita',
-    'registrarAsistencia', 'eliminarAsistencia', 'registrarPago', 'ingresosSemana',
+    'listarPacientes', 'crearPaciente', 'crearPacienteExpres', 'actualizarPaciente', 'eliminarPaciente',
+    'citasDeHoy', 'proximasCitas', 'obtenerCita', 'crearCita', 'actualizarCita',
+    'cancelarCita', 'eliminarCita', 'conflictosDeAgenda',
+    'registrarAsistencia', 'eliminarAsistencia',
+    'registrarPago', 'actualizarPago', 'eliminarPago', 'ingresosSemana',
     'guardarValoracion', 'crearNota', 'agregarAdjunto', 'eliminarNota',
+    'subirArchivo', 'eliminarArchivo', 'enlaceDeArchivo',
     'guardarRutina', 'activarRutina', 'eliminarRutina',
     'guardarPromocion', 'eliminarPromocion',
     'listarSorteos', 'obtenerSorteo', 'guardarSorteo', 'eliminarSorteo',
     'sincronizarBoletos', 'participantesDeSorteo', 'realizarSorteo', 'publicarGanador',
+    'excluidosDeSorteo', 'excluirDeSorteo', 'readmitirEnSorteo',
     'listarSolicitudes', 'actualizarSolicitud', 'convertirSolicitud',
     'resumenDashboard',
     'setConfig', 'subirLogo', 'quitarLogo'
@@ -988,7 +1323,7 @@
   const SOLO_PROPIO = {
     obtenerPaciente: 0, citasDePaciente: 0, proximaCitaDePaciente: 0,
     asistenciasDePaciente: 0, pagosDePaciente: 0,
-    valoracionDePaciente: 0, notasDePaciente: 0,
+    valoracionDePaciente: 0, notasDePaciente: 0, archivosDePaciente: 0,
     rutinasDePaciente: 0, rutinaActiva: 0, misBoletos: 0
   };
 
@@ -1031,16 +1366,20 @@
      ====================================================================== */
   global.API = Object.assign(_proteger({
     setConfig, subirLogo, quitarLogo,
-    listarPacientes, obtenerPaciente, crearPaciente, actualizarPaciente, eliminarPaciente,
-    citasDeHoy, proximasCitas, citasDePaciente, proximaCitaDePaciente, crearCita, actualizarCita, eliminarCita,
+    listarPacientes, obtenerPaciente, crearPaciente, crearPacienteExpres,
+    actualizarPaciente, eliminarPaciente,
+    citasDeHoy, proximasCitas, citasDePaciente, proximaCitaDePaciente, obtenerCita,
+    crearCita, actualizarCita, cancelarCita, eliminarCita, conflictosDeAgenda,
     registrarAsistencia, asistenciasDePaciente, eliminarAsistencia,
-    registrarPago, ingresosSemana, pagosDePaciente,
+    registrarPago, actualizarPago, eliminarPago, ingresosSemana, pagosDePaciente,
     valoracionDePaciente, guardarValoracion,
     notasDePaciente, crearNota, agregarAdjunto, eliminarNota,
+    archivosDePaciente, subirArchivo, eliminarArchivo, enlaceDeArchivo,
     rutinasDePaciente, rutinaActiva, guardarRutina, activarRutina, eliminarRutina,
     listarPromociones, guardarPromocion, eliminarPromocion,
     listarSorteos, obtenerSorteo, guardarSorteo, eliminarSorteo,
     sincronizarBoletos, participantesDeSorteo, realizarSorteo, publicarGanador, misBoletos,
+    excluidosDeSorteo, excluirDeSorteo, readmitirEnSorteo,
     sorteosVitrina, crearSolicitudCita, misSolicitudes,
     listarSolicitudes, actualizarSolicitud, convertirSolicitud,
     resumenDashboard

@@ -1,14 +1,6 @@
-#!/usr/bin/env node
-/* ==========================================================================
-   Genera js/env.js a partir de las variables de entorno.
-   Se ejecuta en el build de Netlify y también en local (`npm run env`).
 
-   Variables que lee (acepta el prefijo VITE_/PUBLIC_ por comodidad):
-     SUPABASE_URL        · SUPABASE_ANON_KEY
+require('dotenv').config();
 
-   Si no están definidas, escribe valores vacíos: la app arranca igual en
-   MODO DEMOSTRACIÓN (datos locales) y avisa en la pantalla de acceso.
-   ========================================================================== */
 const fs = require('fs');
 const path = require('path');
 
