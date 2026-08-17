@@ -83,8 +83,12 @@ create table if not exists pacientes (
   diagnostico     text default '',
   alergias        text default '',
   avatar_url      text default '',
-  paquete_nombre  text default 'Sesión individual',
-  paquete_total   int  not null default 1,
+  -- El paquete es OPCIONAL. `paquete_total = 0` significa «sin paquete
+  -- contratado»: se cobra sesión por sesión y no hay saldo que descontar.
+  -- Por eso el default es 0 y no 1: dar de alta a alguien no debe inventarle
+  -- un paquete que nadie compró.
+  paquete_nombre  text default '',
+  paquete_total   int  not null default 0,
   paquete_usadas  int  not null default 0,
   paquete_vence   timestamptz,
   activo          boolean not null default true,
@@ -97,6 +101,11 @@ create table if not exists pacientes (
 -- Para bases creadas antes de la agenda sin registro previo.
 alter table pacientes
   add column if not exists expediente_pendiente boolean not null default false;
+
+-- El paquete dejó de ser obligatorio. Se cambia solo el DEFAULT: los pacientes
+-- que ya tienen un paquete contratado conservan su saldo intacto.
+alter table pacientes alter column paquete_total  set default 0;
+alter table pacientes alter column paquete_nombre set default '';
 
 create index if not exists idx_pacientes_usuario on pacientes(usuario_id);
 
@@ -121,16 +130,34 @@ create table if not exists citas (
   -- (`configuracion.precio_sesion`). Permite promociones o tarifas puntuales
   -- sin tocar la configuración global.
   precio        numeric(10,2),
-  -- Trazabilidad de la cancelación: quién no vino y por qué.
-  cancelada_en       timestamptz,
-  motivo_cancelacion text default '',
+  -- Bitácora de la cancelación. Son tres datos distintos y hacen falta los
+  -- tres: `cancelada_por` es QUIÉN decidió cancelar (el paciente o la
+  -- clínica) —el dato clínico, el que explica una racha de huecos—, mientras
+  -- que `cancelada_por_usuario` es quién lo tecleó en el sistema —el dato de
+  -- auditoría—. El motivo es obligatorio en la interfaz: una cancelación sin
+  -- razón no sirve para nada dentro de tres meses.
+  cancelada_en          timestamptz,
+  cancelada_por         text default '',       -- 'Paciente' · 'Clínica' · 'Otro'
+  cancelada_por_usuario uuid references perfiles(id) on delete set null,
+  motivo_cancelacion    text default '',
+  -- Igual que arriba, para las faltas: marcar «no asistió» sin poder anotar
+  -- si avisó o no deja el historial de asistencia a medias.
+  falta_en           timestamptz,
+  falta_justificada  boolean not null default false,
+  motivo_falta       text default '',
   creado_en     timestamptz not null default now()
 );
 
--- Para bases anteriores al precio por cita y a la cancelación con motivo.
+-- Para bases anteriores al precio por cita, a la cancelación con bitácora y
+-- al registro de faltas.
 alter table citas add column if not exists precio numeric(10,2);
 alter table citas add column if not exists cancelada_en timestamptz;
 alter table citas add column if not exists motivo_cancelacion text default '';
+alter table citas add column if not exists cancelada_por text default '';
+alter table citas add column if not exists cancelada_por_usuario uuid references perfiles(id) on delete set null;
+alter table citas add column if not exists falta_en timestamptz;
+alter table citas add column if not exists falta_justificada boolean not null default false;
+alter table citas add column if not exists motivo_falta text default '';
 
 -- El precio nunca es negativo (ni en la agenda ni en el cobro que genera).
 do $$ begin
@@ -197,6 +224,35 @@ create table if not exists valoraciones (
   actualizado_en     timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- OPCIONES PERSONALIZADAS DE LA VALORACIÓN
+--
+--   Las listas de `SECCIONES_VALORACION` (js/store.js) cubren lo habitual,
+--   pero ninguna lista cerrada aguanta la consulta real: llega un paciente con
+--   un antecedente, un test o un mecanismo de lesión que no está, y hoy la
+--   única salida es escribirlo en un campo de texto donde ya no se puede
+--   filtrar ni contar.
+--
+--   Aquí se guardan las opciones que añade el fisio. Son de la CLÍNICA, no del
+--   paciente: se escriben una vez y quedan disponibles para todas las
+--   valoraciones siguientes. El catálogo base NO se toca —así una
+--   actualización del código no borra lo añadido, ni lo añadido esconde una
+--   opción nueva del catálogo—: se concatenan al pintar.
+--
+--   `campo` guarda la ruta `seccion.campo` tal como la usa el renderizador.
+-- ----------------------------------------------------------------------------
+create table if not exists valoracion_opciones (
+  id        uuid primary key default gen_random_uuid(),
+  seccion   text not null,
+  campo     text not null,
+  valor     text not null,
+  creado_en timestamptz not null default now(),
+  -- La misma opción no puede añadirse dos veces al mismo campo.
+  unique (seccion, campo, valor)
+);
+
+create index if not exists idx_valopc_campo on valoracion_opciones(seccion, campo);
+
 create index if not exists idx_valoraciones_paciente on valoraciones(paciente_id, creado_en desc);
 
 -- ============================================================================
@@ -251,11 +307,26 @@ create table if not exists ejercicios (
   descripcion  text default '',
   cue          text default '',
   image_url    text default '',
+  -- Ruta del objeto en el bucket `ejercicios`. Se guarda APARTE de la url
+  -- porque al reemplazar o borrar la foto hay que saber qué binario retirar,
+  -- y de una url pública no se puede deducir con seguridad.
+  image_ruta   text default '',
   sets         int default 3,
   reps         int default 10,
   hold         int default 0,
-  activo       boolean not null default true
+  activo       boolean not null default true,
+  -- Distingue el catálogo que viene con el sistema de lo que añade la
+  -- clínica: al reinstalar, el seed solo debe pisar lo suyo.
+  propio       boolean not null default false,
+  creado_en    timestamptz not null default now()
 );
+
+-- Para bases anteriores al catálogo editable.
+alter table ejercicios add column if not exists image_ruta text default '';
+alter table ejercicios add column if not exists propio boolean not null default false;
+alter table ejercicios add column if not exists creado_en timestamptz not null default now();
+
+create index if not exists idx_ejercicios_categoria on ejercicios(categoria) where activo;
 
 create table if not exists rutinas (
   id           uuid primary key default gen_random_uuid(),
@@ -343,13 +414,35 @@ create table if not exists boletos (
   paciente_id    uuid not null references pacientes(id) on delete cascade,
   asistencia_id  uuid references asistencias(id) on delete cascade,
   codigo         text not null,
+  -- ANULACIÓN DE UN BOLETO SUELTO
+  --   Quitar UNA participación no puede ser `delete`: el boleto nace de una
+  --   asistencia que sigue existiendo, así que `sincronizar_boletos` lo
+  --   repondría en el siguiente guardado del sorteo (el mismo problema que
+  --   resolvió `sorteo_excluidos`, pero a nivel de boleto).
+  --
+  --   Se marca en su lugar. La fila se queda, el `unique (sorteo_id,
+  --   asistencia_id)` sigue ocupado y el `on conflict do nothing` de la
+  --   sincronización lo respeta solo. Es reversible: basta con limpiar la
+  --   marca para devolver la participación.
+  anulado_en       timestamptz,
+  anulado_por      uuid references perfiles(id) on delete set null,
+  motivo_anulacion text default '',
   creado_en      timestamptz not null default now(),
   -- 1 boleto por asistencia y sorteo: la idempotencia la garantiza la BD
   unique (sorteo_id, asistencia_id)
 );
 
+-- Para bases anteriores a la anulación por participación.
+alter table boletos add column if not exists anulado_en timestamptz;
+alter table boletos add column if not exists anulado_por uuid references perfiles(id) on delete set null;
+alter table boletos add column if not exists motivo_anulacion text default '';
+
 create index if not exists idx_boletos_sorteo   on boletos(sorteo_id);
 create index if not exists idx_boletos_paciente on boletos(paciente_id, sorteo_id);
+
+-- Los boletos que de verdad participan. Es el índice que usan el conteo del
+-- sorteo y la tómbola.
+create index if not exists idx_boletos_vivos on boletos(sorteo_id) where anulado_en is null;
 
 -- ----------------------------------------------------------------------------
 -- PARTICIPANTES EXCLUIDOS
@@ -467,10 +560,15 @@ declare b boletos%rowtype; v_total bigint;
 begin
   if not es_fisio() then raise exception 'Solo el fisioterapeuta puede sortear'; end if;
 
-  select count(*) into v_total from boletos where sorteo_id = p_sorteo;
+  -- Un boleto anulado no compite ni cuenta: si pudiera salir premiado, la
+  -- anulación no habría servido de nada.
+  select count(*) into v_total
+    from boletos where sorteo_id = p_sorteo and anulado_en is null;
   if v_total = 0 then raise exception 'No hay boletos emitidos para este sorteo'; end if;
 
-  select * into b from boletos where sorteo_id = p_sorteo order by random() limit 1;
+  select * into b from boletos
+   where sorteo_id = p_sorteo and anulado_en is null
+   order by random() limit 1;
 
   update sorteos
      set ganador_paciente_id = b.paciente_id,
@@ -496,12 +594,31 @@ select
   p.*,
   ua.ultima_asistencia,
   coalesce(ua.total_visitas, 0)                   as total_visitas,
-  greatest(p.paquete_total - p.paquete_usadas, 0) as paquete_restantes
+  greatest(p.paquete_total - p.paquete_usadas, 0) as paquete_restantes,
+  -- Control de asistencia. Se cuenta aquí y no en el cliente porque la lista
+  -- de pacientes no trae sus citas: pedirlas una por una para pintar un
+  -- contador serían N consultas por pantalla.
+  coalesce(ct.total_faltas, 0)      as total_faltas,
+  coalesce(ct.total_canceladas, 0)  as total_canceladas,
+  ct.ultima_falta,
+  -- Porcentaje de cumplimiento sobre las citas que ya pasaron por caja
+  -- (asistidas + faltas). Las canceladas NO entran: avisar no es faltar, y
+  -- castigarlo desincentivaría justo lo que la clínica quiere que hagan.
+  case when coalesce(ua.total_visitas, 0) + coalesce(ct.total_faltas, 0) = 0 then null
+       else round(100.0 * coalesce(ua.total_visitas, 0)
+                  / (coalesce(ua.total_visitas, 0) + coalesce(ct.total_faltas, 0)))
+  end as cumplimiento
 from pacientes p
 left join lateral (
   select max(a.asistio_en) as ultima_asistencia, count(*) as total_visitas
     from asistencias a where a.paciente_id = p.id
 ) ua on true
+left join lateral (
+  select count(*) filter (where c.estado = 'no_asistio')                as total_faltas,
+         count(*) filter (where c.estado = 'cancelada')                 as total_canceladas,
+         max(c.inicia_en) filter (where c.estado = 'no_asistio')        as ultima_falta
+    from citas c where c.paciente_id = p.id
+) ct on true
 order by ua.ultima_asistencia desc nulls last, p.nombre;
 
 -- ============================================================================
@@ -520,6 +637,56 @@ begin
      group by d
      order by d;
 end $$;
+
+-- ============================================================================
+-- 12 bis · AVISOS AUTOMÁTICOS  (Cloudflare Worker + Cron Triggers)
+--
+--   Dos recordatorios, los dos dirigidos AL FISIO:
+--
+--     · `recordatorio_dia`  a las 18:00, con las citas del día siguiente y el
+--                           mensaje de WhatsApp ya redactado para cada
+--                           paciente. El envío al paciente lo confirma una
+--                           persona: es lo que evita que salga un recordatorio
+--                           a quien acaba de cancelar.
+--     · `previo_40`         40 minutos antes de cada sesión.
+--
+--   El navegador no puede hacer esto: si está cerrado, no hay quien despierte.
+--   Por eso corre en un Worker (`worker/`), que entra con la service_role key
+--   y por tanto se salta RLS —de ahí que estas tablas no dependan de que el
+--   fisio tenga sesión abierta.
+-- ============================================================================
+
+-- ---- Suscripciones push ----------------------------------------------------
+-- Una por navegador/dispositivo: el mismo fisio con el móvil y el portátil son
+-- dos filas. El endpoint lo emite el navegador y es único por instalación.
+create table if not exists push_suscripciones (
+  id          uuid primary key default gen_random_uuid(),
+  usuario_id  uuid not null references auth.users(id) on delete cascade,
+  endpoint    text not null unique,
+  p256dh      text not null,          -- clave pública del cliente
+  auth        text not null,          -- secreto de autenticación
+  agente      text default '',        -- para que el fisio reconozca el aparato
+  creado_en   timestamptz not null default now(),
+  ultimo_ok   timestamptz,
+  fallos      int not null default 0  -- 410/404 seguidos ⇒ se da de baja sola
+);
+
+create index if not exists idx_push_usuario on push_suscripciones(usuario_id);
+
+-- ---- Bitácora de envíos ----------------------------------------------------
+-- La razón de existir es la idempotencia. El cron de los 40 minutos corre cada
+-- 5, así que la MISMA cita entra en varias pasadas; sin esta tabla el fisio
+-- recibiría el mismo aviso ocho veces. La clave primaria es la que garantiza
+-- que se manda una sola vez, no un `if` del Worker.
+create table if not exists avisos_enviados (
+  tipo       text not null,           -- 'recordatorio_dia' · 'previo_40'
+  cita_id    uuid not null references citas(id) on delete cascade,
+  enviado_en timestamptz not null default now(),
+  detalle    text default '',
+  primary key (tipo, cita_id)
+);
+
+create index if not exists idx_avisos_fecha on avisos_enviados(enviado_en desc);
 
 -- ============================================================================
 -- 13 · ROW LEVEL SECURITY
@@ -541,6 +708,9 @@ alter table sorteos      enable row level security;
 alter table boletos      enable row level security;
 alter table archivos     enable row level security;
 alter table sorteo_excluidos enable row level security;
+alter table valoracion_opciones enable row level security;
+alter table push_suscripciones  enable row level security;
+alter table avisos_enviados     enable row level security;
 
 -- ---- Perfiles --------------------------------------------------------------
 drop policy if exists perfil_propio on perfiles;
@@ -555,7 +725,8 @@ declare t text;
 begin
   foreach t in array array['pacientes','citas','asistencias','pagos','valoraciones',
                            'notas','ejercicios','rutinas','rutina_items','promociones',
-                           'sorteos','boletos','archivos','sorteo_excluidos']
+                           'sorteos','boletos','archivos','sorteo_excluidos',
+                           'valoracion_opciones','avisos_enviados']
   loop
     execute format('drop policy if exists fisio_total on %I;', t);
     execute format(
@@ -621,6 +792,22 @@ create policy pac_ve_sus_archivos on archivos for select to authenticated
 drop policy if exists todos_ven_ejercicios on ejercicios;
 create policy todos_ven_ejercicios on ejercicios for select to authenticated using (activo);
 
+-- Las opciones que añadió el fisio tienen que poder LEERSE al pintar una
+-- valoración; escribirlas ya lo cubre `fisio_total`.
+drop policy if exists todos_ven_opciones on valoracion_opciones;
+create policy todos_ven_opciones on valoracion_opciones for select to authenticated using (true);
+
+-- ---- Suscripciones push ----------------------------------------------------
+-- Cada quien administra las suyas y no ve las de nadie más. Un endpoint push
+-- es material sensible: con él se le puede mandar una notificación a ese
+-- aparato, así que ni siquiera el fisio necesita leer los ajenos.
+--
+-- El Worker no pasa por aquí: entra con la service_role key para poder mandar
+-- avisos cuando no hay ninguna sesión abierta.
+drop policy if exists push_propias on push_suscripciones;
+create policy push_propias on push_suscripciones for all to authenticated
+  using (usuario_id = auth.uid()) with check (usuario_id = auth.uid());
+
 drop policy if exists todos_ven_promos on promociones;
 create policy todos_ven_promos on promociones for select to authenticated using (activa);
 
@@ -658,6 +845,22 @@ create policy "fisio borra evidencias" on storage.objects for delete
 drop policy if exists "todos leen ejercicios" on storage.objects;
 create policy "todos leen ejercicios" on storage.objects for select
   using (bucket_id = 'ejercicios');
+
+-- El catálogo de ejercicios lo mantiene el fisio: subir, reemplazar y borrar
+-- la foto de un ejercicio. El bucket es PÚBLICO a propósito —la foto de un
+-- ejercicio no es dato clínico y el paciente la abre desde su rutina—, pero
+-- escribir en él sigue siendo exclusivo del fisio.
+drop policy if exists "fisio sube ejercicios" on storage.objects;
+create policy "fisio sube ejercicios" on storage.objects for insert
+  to authenticated with check (bucket_id = 'ejercicios' and es_fisio());
+
+drop policy if exists "fisio actualiza ejercicios" on storage.objects;
+create policy "fisio actualiza ejercicios" on storage.objects for update
+  to authenticated using (bucket_id = 'ejercicios' and es_fisio());
+
+drop policy if exists "fisio borra ejercicios" on storage.objects;
+create policy "fisio borra ejercicios" on storage.objects for delete
+  to authenticated using (bucket_id = 'ejercicios' and es_fisio());
 
 -- ---- Archivos del expediente (radiografías, informes, PDF) -----------------
 -- Bucket privado: se lee siempre por URL firmada y con caducidad, nunca por

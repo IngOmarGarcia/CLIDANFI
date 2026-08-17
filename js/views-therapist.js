@@ -786,19 +786,20 @@
 
   /* --------------------------------------------------- Tab · Resumen ----- */
   async function tabResumen(p, { usadas, total, pct }) {
-    const [asistencias, pagos, citas] = await Promise.all([
-      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id)
+    const [asistencias, pagos, citas, cumpl] = await Promise.all([
+      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
+      API.cumplimientoDePaciente(p.id)
     ]);
     const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
     const prox = p.proxima_cita;
 
     return `
-      ${card(`
+      ${total > 0 ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
           ${badge(p.paquete_restantes === 0 ? 'Agotado' : `${p.paquete_restantes} restantes`, p.paquete_restantes === 0 ? 'rose' : p.paquete_restantes <= 2 ? 'amber' : 'green')}
         </div>
-        <p class="mt-1.5 text-[15px] font-extrabold text-ink-900">${E(p.paquete_nombre)}</p>
+        <p class="mt-1.5 text-[15px] font-extrabold text-ink-900">${E(p.paquete_nombre || 'Paquete')}</p>
         <div class="mt-2.5 h-2.5 w-full overflow-hidden rounded-full bg-ink-100">
           <div class="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-600 transition-all" style="width:${pct}%"></div>
         </div>
@@ -806,7 +807,47 @@
           <span>${usadas} de ${total} usadas</span>
           <span>${p.paquete_vence ? `Vence ${E(fmtDate(p.paquete_vence))}` : 'Sin vigencia'}</span>
         </div>
+      `) : card(`
+        <!-- Sin paquete no se pinta una barra al 0 %: parecería un paquete
+             agotado, que es lo contrario de «paga por sesión». -->
+        <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
+        <p class="mt-1 text-[13.5px] font-bold text-ink-700">Sin paquete · paga por sesión</p>
+        <button data-action="editar-paciente" data-id="${p.id}"
+          class="mt-2 rounded-xl bg-ink-100 px-3 py-1.5 text-[12px] font-bold text-ink-600 active:scale-95">
+          Contratar un paquete
+        </button>
       `)}
+
+      ${(cumpl.faltas > 0 || cumpl.canceladas > 0) ? card(`
+        <div class="flex items-center justify-between">
+          <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Control de asistencia</p>
+          ${cumpl.cumplimiento !== null
+            ? badge(`${cumpl.cumplimiento}% cumplimiento`,
+                    cumpl.cumplimiento >= 85 ? 'green' : cumpl.cumplimiento >= 60 ? 'amber' : 'rose')
+            : ''}
+        </div>
+        <div class="mt-2 grid grid-cols-3 gap-2 text-center">
+          <div class="rounded-xl bg-emerald-50 py-2">
+            <p class="text-[17px] font-extrabold text-emerald-700">${cumpl.asistidas}</p>
+            <p class="text-[10.5px] font-bold uppercase tracking-wide text-emerald-600">Asistió</p>
+          </div>
+          <div class="rounded-xl bg-rose-50 py-2">
+            <p class="text-[17px] font-extrabold text-rose-700">${cumpl.faltas}</p>
+            <p class="text-[10.5px] font-bold uppercase tracking-wide text-rose-600">Faltas</p>
+          </div>
+          <div class="rounded-xl bg-ink-100 py-2">
+            <p class="text-[17px] font-extrabold text-ink-600">${cumpl.canceladas}</p>
+            <p class="text-[10.5px] font-bold uppercase tracking-wide text-ink-500">Canceló</p>
+          </div>
+        </div>
+        ${cumpl.ultima_falta ? `
+          <p class="mt-2 text-[11.5px] font-semibold text-ink-500">
+            Última falta: ${E(fmtDate(cumpl.ultima_falta))}
+          </p>` : ''}
+        <p class="mt-1.5 text-[11px] leading-snug text-ink-400">
+          Las cancelaciones no bajan el cumplimiento: avisar es justo lo que se quiere que hagan.
+        </p>
+      `) : ''}
 
       ${prox ? card(`
         <div class="flex items-center gap-3">
@@ -1111,11 +1152,37 @@
     const p = await API.obtenerPaciente(params.id);
     if (!p) return { titulo: 'Valoración', html: `<div class="p-4">${emptyState('alert', 'Paciente no encontrado')}</div>` };
 
-    const v = await API.valoracionDePaciente(p.id);
+    const [v, extra] = await Promise.all([
+      API.valoracionDePaciente(p.id),
+      API.opcionesValoracion()
+    ]);
+
     const activas = new Set(v && v.secciones_activas && v.secciones_activas.length
       ? v.secciones_activas
       : ['general', 'dolor', 'diagnostico']);
     const datos = (v && v.datos) || {};
+
+    /**
+     * Opciones de una lista: las del catálogo MÁS las que añadió el fisio.
+     *
+     * Se concatenan en vez de sustituirse. Así una actualización del catálogo
+     * no borra lo añadido en la clínica, y lo añadido tampoco esconde una
+     * opción nueva que llegue con el código.
+     */
+    const opcionesDe = (sec, c) => {
+      const base = Array.isArray(c.options) ? c.options : [];
+      const propias = (extra[`${sec.key}.${c.key}`] || []).map((o) => o.valor);
+      return base.concat(propias.filter((o) => !base.includes(o)));
+    };
+
+    /** Botón para ampliar la lista, solo en los tipos que son una lista. */
+    const botonAnadir = (sec, c) =>
+      Store.CAMPOS_AMPLIABLES.includes(c.type)
+        ? `<button type="button" data-anadir-opcion="${sec.key}.${c.key}" data-label="${E(c.label)}"
+             class="rounded-full border border-dashed border-brand-300 bg-brand-50/60 px-3 py-1.5 text-[12px] font-bold text-brand-700 active:scale-95">
+             + Otra
+           </button>`
+        : '';
 
     /* --- Render de un campo según su tipo --- */
     function campo(sec, c) {
@@ -1134,10 +1201,15 @@
           </div></div>`;
 
         case 'select':
-          return `<div>${label}<select class="field" data-f="${name}">
-            <option value="">— Selecciona —</option>
-            ${c.options.map((o) => `<option ${val === o ? 'selected' : ''}>${E(o)}</option>`).join('')}
-          </select></div>`;
+          return `<div>${label}
+            <div class="flex items-center gap-1.5">
+              <select class="field" data-f="${name}">
+                <option value="">— Selecciona —</option>
+                ${opcionesDe(sec, c).map((o) => `<option ${val === o ? 'selected' : ''}>${E(o)}</option>`).join('')}
+              </select>
+              ${botonAnadir(sec, c)}
+            </div>
+          </div>`;
 
         case 'range': {
           const v0 = val ?? 0;
@@ -1155,12 +1227,13 @@
         case 'checks': {
           const set = new Set(Array.isArray(val) ? val : []);
           return `<div>${label}<div class="flex flex-wrap gap-1.5">
-            ${c.options.map((o) => `
+            ${opcionesDe(sec, c).map((o) => `
               <label class="cursor-pointer">
                 <input type="checkbox" class="peer sr-only" data-f="${name}" data-multi="1" value="${E(o)}" ${set.has(o) ? 'checked' : ''} />
                 <span class="inline-block rounded-full border border-ink-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-ink-600
                   peer-checked:border-brand-500 peer-checked:bg-brand-50 peer-checked:text-brand-800">${E(o)}</span>
               </label>`).join('')}
+            ${botonAnadir(sec, c)}
           </div></div>`;
         }
 
@@ -1191,7 +1264,7 @@
           const obj = val || {};
           return `<div>${label}
             <div class="space-y-1.5">
-              ${c.options.map((t) => {
+              ${opcionesDe(sec, c).map((t) => {
                 const cur = obj[t] || 'NE';
                 const op = (v2, txt, cls) => `
                   <label class="cursor-pointer">
@@ -1205,6 +1278,7 @@
                   ${op('NE', 'N/E', 'peer-checked:bg-ink-200 peer-checked:text-ink-700')}
                 </div>`;
               }).join('')}
+              ${botonAnadir(sec, c)}
             </div></div>`;
         }
 
@@ -1284,6 +1358,113 @@
           out.className = `text-[15px] font-extrabold ${v0 >= 7 ? 'text-rose-600' : v0 >= 4 ? 'text-amber-600' : 'text-emerald-600'}`;
         });
       });
+
+      /* --- Ampliar una lista ---------------------------------------------
+         La opción se guarda para toda la clínica, no solo para este paciente:
+         un antecedente o un test que hizo falta una vez casi siempre vuelve a
+         hacer falta. Queda disponible en la siguiente valoración sin tener
+         que volver a escribirlo.
+
+         Se recarga la pantalla al terminar porque la lista se pinta de una
+         sola pieza; el aviso de cambios sin guardar protege lo capturado. */
+      /**
+       * Mete la opción recién creada en la lista que ya está en pantalla.
+       *
+       * Se hace por DOM y NO recargando la vista: el fisio puede llevar media
+       * valoración capturada y un `App.render()` la borraría entera. Añadir
+       * una opción no puede costar el trabajo de los últimos diez minutos.
+       */
+      const inyectarOpcion = (boton, ruta, valor) => {
+        const contenedor = boton.parentElement;
+        const select = contenedor.querySelector(`select[data-f="${ruta}"]`);
+
+        if (select) {
+          const op = document.createElement('option');
+          op.textContent = valor;
+          op.selected = true;                 // se acaba de escribir: se elige
+          select.appendChild(op);
+          return;
+        }
+
+        // `tests` se distingue de `checks` porque sus filas llevan radios.
+        const esTest = !!contenedor.querySelector('input[data-test]');
+
+        if (esTest) {
+          const fila = document.createElement('div');
+          fila.className = 'flex items-center gap-2 rounded-xl border border-ink-200 bg-white px-3 py-2 anim-fade';
+          const op = (v2, txt, cls) => `
+            <label class="cursor-pointer">
+              <input type="radio" class="peer sr-only" name="${E(ruta + '::' + valor)}" data-f="${ruta}" data-row="${E(valor)}" data-test="1" value="${v2}" ${v2 === 'NE' ? 'checked' : ''} />
+              <span class="inline-block rounded-lg px-2.5 py-1 text-[11px] font-bold text-ink-500 ${cls}">${txt}</span>
+            </label>`;
+          fila.innerHTML =
+            `<span class="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink-700">${E(valor)}</span>` +
+            op('Pos', 'Positivo', 'peer-checked:bg-rose-100 peer-checked:text-rose-700') +
+            op('Neg', 'Negativo', 'peer-checked:bg-emerald-100 peer-checked:text-emerald-700') +
+            op('NE', 'N/E', 'peer-checked:bg-ink-200 peer-checked:text-ink-700');
+          contenedor.insertBefore(fila, boton);
+          return;
+        }
+
+        // checks
+        const etiqueta = document.createElement('label');
+        etiqueta.className = 'cursor-pointer anim-fade';
+        etiqueta.innerHTML =
+          `<input type="checkbox" class="peer sr-only" data-f="${ruta}" data-multi="1" value="${E(valor)}" checked />
+           <span class="inline-block rounded-full border border-ink-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-ink-600
+             peer-checked:border-brand-500 peer-checked:bg-brand-50 peer-checked:text-brand-800">${E(valor)}</span>`;
+        contenedor.insertBefore(etiqueta, boton);
+      };
+
+      root.querySelectorAll('[data-anadir-opcion]').forEach((b) => b.addEventListener('click', () => {
+        const ruta = b.dataset.anadirOpcion;
+        const [seccion, campoKey] = ruta.split('.');
+
+        openSheet({
+          title: 'Añadir opción',
+          subtitle: b.dataset.label,
+          body: `
+            <div class="space-y-3">
+              <input id="f-nueva-opcion" class="field" placeholder="Escribe la opción nueva" maxlength="80" />
+              <p class="text-[11.5px] font-medium leading-snug text-ink-500">
+                Se añade a esta lista para <strong>todas las valoraciones</strong>, no solo
+                la de este paciente. El catálogo que viene con el sistema no se toca.
+              </p>
+            </div>`,
+          footer: `<button id="btn-nueva-opcion" class="w-full rounded-xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">
+                     Añadir a la lista</button>`,
+          onMount: (sheet) => {
+            const campoTexto = sheet.querySelector('#f-nueva-opcion');
+            campoTexto.focus();
+
+            const guardar = async () => {
+              const valor = campoTexto.value.trim();
+              if (!valor) return toast('Escribe el texto de la opción', 'warn');
+
+              const boton = sheet.querySelector('#btn-nueva-opcion');
+              boton.disabled = true;
+              boton.textContent = 'Añadiendo…';
+              try {
+                const r = await API.agregarOpcionValoracion(seccion, campoKey, valor);
+                closeSheet();
+                if (r.ya) {
+                  toast(`«${valor}» ya estaba en la lista`, 'warn');
+                } else {
+                  inyectarOpcion(b, ruta, valor);
+                  toast(`«${valor}» añadida y marcada`);
+                }
+              } catch (err) {
+                boton.disabled = false;
+                boton.textContent = 'Añadir a la lista';
+                toast(err.message || 'No se pudo añadir la opción', 'error', 5000);
+              }
+            };
+
+            sheet.querySelector('#btn-nueva-opcion').addEventListener('click', guardar);
+            campoTexto.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') guardar(); });
+          }
+        });
+      }));
     };
 
     return { titulo: 'Valoración inicial', html, onMount, volver: `#/t/paciente/${p.id}?tab=valoracion` };
@@ -1342,6 +1523,18 @@
     const p = await API.obtenerPaciente(params.id);
     if (!p) return { titulo: 'Rutina', html: `<div class="p-4">${emptyState('alert', 'Paciente no encontrado')}</div>` };
 
+    // El catálogo sale de la BASE, no de `Store.CATALOGO_EJERCICIOS`: desde
+    // que el fisio puede dar de alta ejercicios propios, leer el catálogo
+    // local dejaría los suyos fuera del generador de rutinas, que es justo
+    // donde hacen falta.
+    const catalogoEj = await API.listarEjercicios();
+    // Respaldo al catálogo local: una rutina antigua puede referenciar un
+    // ejercicio que ya se desactivó, y sin esto su fila saldría vacía.
+    const buscarEj = (id) =>
+      catalogoEj.find((e) => e.id === id) ||
+      Store.ejercicio(id) ||
+      { id, nombre: 'Ejercicio retirado', categoria: '—', image_url: '', descripcion: '', sets: 3, reps: 10, hold: 0 };
+
     let base = null;
     if (query.rid) {
       const todas = await API.rutinasDePaciente(p.id);
@@ -1397,7 +1590,7 @@
             <input id="ex-buscar" type="search" data-no-vigilar placeholder="Buscar ejercicio…" class="field !pl-10 !py-2.5" />
           </div>
           <div id="catalogo" class="scroll-x no-scrollbar pb-1">
-            ${Store.CATALOGO_EJERCICIOS.map(tarjetaCatalogo).join('')}
+            ${catalogoEj.map(tarjetaCatalogo).join('')}
           </div>
         </div>
 
@@ -1418,7 +1611,7 @@
       const catalogo = root.querySelector('#catalogo');
 
       const filaSeleccion = (sel, idx) => {
-        const ex = Store.ejercicio(sel.ejercicio_id);
+        const ex = buscarEj(sel.ejercicio_id);
         return `
           <div class="rounded-2xl border border-ink-200/70 bg-white p-2.5 shadow-card" data-sel="${idx}">
             <div class="flex items-center gap-2.5">
@@ -1472,7 +1665,7 @@
         const i = seleccion.findIndex((s) => s.ejercicio_id === exId);
         if (i >= 0) { seleccion.splice(i, 1); }
         else {
-          const ex = Store.ejercicio(exId);
+          const ex = buscarEj(exId);
           seleccion.push({ ejercicio_id: exId, series: ex.sets, reps: ex.reps, hold: ex.hold, frecuencia: 'Diario', nota: '' });
         }
         marcarSucio();
@@ -1507,7 +1700,7 @@
       let cat = 'Todas', q = '';
       const filtrar = () => {
         const term = UI.normalize(q);
-        const list = Store.CATALOGO_EJERCICIOS.filter((ex) =>
+        const list = catalogoEj.filter((ex) =>
           (cat === 'Todas' || ex.categoria === cat) &&
           (!term || UI.normalize(ex.nombre).includes(term) || UI.normalize(ex.descripcion).includes(term)));
         catalogo.innerHTML = list.length ? list.map(tarjetaCatalogo).join('')
@@ -1667,27 +1860,55 @@
               </span>
             </label>` : ''}
 
+          ${(() => {
+            // El paquete es OPCIONAL: mucha gente paga sesión por sesión. Antes
+            // el formulario venía con «Paquete 10 sesiones» y un 10 escritos, y
+            // guardar sin mirar le inventaba al paciente un saldo que nadie
+            // había comprado —y que luego descuadraba el conteo de sesiones.
+            const conPaquete = !!(p && p.paquete_total > 0);
+            return `
           <div class="rounded-xl bg-brand-50 p-3">
-            <p class="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-brand-700">Paquete de sesiones</p>
-            <input id="f-paq-nombre" class="field mb-2" value="${E(p ? p.paquete_nombre : 'Paquete 10 sesiones')}" placeholder="Nombre del paquete" />
-            <div class="grid grid-cols-3 gap-2">
-              <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Total</label>
-                <input id="f-paq-total" type="number" min="0" class="field" value="${p ? p.paquete_total : 10}" /></div>
-              <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Usadas</label>
-                <input id="f-paq-usadas" type="number" min="0" class="field" value="${p ? p.paquete_usadas : 0}" /></div>
-              <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Vence</label>
-                <input id="f-paq-vence" type="date" class="field" value="${p && p.paquete_vence ? isoDay(p.paquete_vence) : ''}" /></div>
+            <label class="flex items-center gap-2.5">
+              <input id="f-paq-on" type="checkbox" ${conPaquete ? 'checked' : ''} class="h-5 w-5 rounded" />
+              <span class="text-[12.5px] font-extrabold text-brand-800">
+                Tiene un paquete de sesiones contratado
+                <span class="block text-[11px] font-semibold text-brand-600">
+                  Déjalo apagado si paga sesión por sesión.
+                </span>
+              </span>
+            </label>
+
+            <div id="paq-campos" class="mt-3 ${conPaquete ? '' : 'hidden'}">
+              <input id="f-paq-nombre" class="field mb-2"
+                value="${E(p && p.paquete_nombre ? p.paquete_nombre : '')}" placeholder="Nombre del paquete" />
+              <div class="grid grid-cols-3 gap-2">
+                <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Total</label>
+                  <input id="f-paq-total" type="number" min="0" class="field" value="${p && p.paquete_total ? p.paquete_total : 10}" /></div>
+                <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Usadas</label>
+                  <input id="f-paq-usadas" type="number" min="0" class="field" value="${p ? p.paquete_usadas : 0}" /></div>
+                <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Vence</label>
+                  <input id="f-paq-vence" type="date" class="field" value="${p && p.paquete_vence ? isoDay(p.paquete_vence) : ''}" /></div>
+              </div>
             </div>
-          </div>
+          </div>`;
+          })()}
         </div>`,
       footer: `<button id="btn-guardar-pac" class="w-full rounded-xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">
                  ${p ? 'Guardar cambios' : 'Registrar paciente'}</button>`,
       onMount: (root) => {
+        const paqOn = root.querySelector('#f-paq-on');
+        const paqCampos = root.querySelector('#paq-campos');
+        paqOn.addEventListener('change', () => paqCampos.classList.toggle('hidden', !paqOn.checked));
+
         root.querySelector('#btn-guardar-pac').addEventListener('click', async () => {
           const nombre = val(root, '#f-nombre');
           if (!nombre) return toast('El nombre es obligatorio', 'error');
           const vence = val(root, '#f-paq-vence');
           const pendiente = root.querySelector('#f-pendiente');
+          // Sin paquete se guardan ceros de forma explícita: si se dejaran los
+          // valores que hubiera en los campos ocultos, apagar el interruptor
+          // no borraría nada.
+          const conPaquete = paqOn.checked;
           const data = {
             nombre,
             // Quien llena esta ficha entera está completando el expediente;
@@ -1699,10 +1920,10 @@
             email: val(root, '#f-email'),
             diagnostico: val(root, '#f-dx'),
             alergias: val(root, '#f-alergias'),
-            paquete_nombre: val(root, '#f-paq-nombre'),
-            paquete_total: Number(val(root, '#f-paq-total')) || 0,
-            paquete_usadas: Number(val(root, '#f-paq-usadas')) || 0,
-            paquete_vence: vence ? new Date(vence + 'T20:00:00').toISOString() : null
+            paquete_nombre: conPaquete ? val(root, '#f-paq-nombre') : '',
+            paquete_total: conPaquete ? (Number(val(root, '#f-paq-total')) || 0) : 0,
+            paquete_usadas: conPaquete ? (Number(val(root, '#f-paq-usadas')) || 0) : 0,
+            paquete_vence: conPaquete && vence ? new Date(vence + 'T20:00:00').toISOString() : null
           };
           if (p) { await API.actualizarPaciente(p.id, data); toast('Paciente actualizado'); }
           else { const nuevo = await API.crearPaciente(data); toast('Paciente registrado'); location.hash = `#/t/paciente/${nuevo.id}`; }
@@ -2026,7 +2247,7 @@
         if (a === 'whatsapp') return whatsappCita(c.id, viva ? 'recordatorio' : 'seguimiento');
         if (a === 'reagendar') return sheetCita(c.paciente_id, c.id);
         if (a === 'cancelar') return sheetCancelarCita(c.id);
-        if (a === 'no-asistio') { await API.actualizarCita(c.id, { estado: 'no_asistio' }); toast('Cita marcada como no asistida', 'warn'); return App.render(); }
+        if (a === 'no-asistio') return sheetMarcarFalta(c.id);
         if (a === 'eliminar') {
           const ok = await confirmSheet({
             title: 'Eliminar cita',
@@ -2074,7 +2295,21 @@
           </div>
 
           <div>
-            <label class="mb-1.5 block text-[12px] font-bold text-ink-700">Motivo</label>
+            <label class="mb-1.5 block text-[12px] font-bold text-ink-700">¿Quién cancela?</label>
+            <div class="grid grid-cols-3 gap-1.5">
+              ${['Paciente', 'Clínica', 'Otro'].map((q, i) => `
+                <button type="button" data-quien="${E(q)}"
+                  class="rounded-xl border py-2.5 text-[12.5px] font-bold active:scale-95
+                    ${i === 0 ? 'border-rose-400 bg-rose-50 text-rose-700' : 'border-ink-200 bg-white text-ink-600'}">
+                  ${E(q)}
+                </button>`).join('')}
+            </div>
+          </div>
+
+          <div>
+            <label class="mb-1.5 block text-[12px] font-bold text-ink-700">
+              Motivo <span class="text-rose-600">*</span>
+            </label>
             <div class="mb-2 flex flex-wrap gap-1.5">
               ${MOTIVOS_CANCELACION.map((m) => `
                 <button type="button" data-motivo="${E(m)}"
@@ -2082,7 +2317,10 @@
                   ${E(m)}
                 </button>`).join('')}
             </div>
-            <input id="f-can-motivo" class="field" placeholder="O escríbelo con tus palabras (opcional)" />
+            <input id="f-can-motivo" class="field" placeholder="Toca uno de arriba o escríbelo con tus palabras" />
+            <p class="mt-1 text-[11px] font-medium text-ink-400">
+              Queda en el historial del paciente. Dentro de tres meses es lo único que explica el hueco.
+            </p>
           </div>
 
           ${tieneWhatsApp ? `
@@ -2105,23 +2343,42 @@
         </div>`,
       onMount: (root) => {
         const campo = root.querySelector('#f-can-motivo');
+        let quien = 'Paciente';
+
+        const marcar = (grupo, elegido, clases) =>
+          root.querySelectorAll(grupo).forEach((o) => {
+            const on = o === elegido;
+            clases.forEach((c2) => o.classList.toggle(c2, on));
+            o.classList.toggle('border-ink-200', !on);
+          });
+
+        root.querySelectorAll('[data-quien]').forEach((b) => b.addEventListener('click', () => {
+          quien = b.dataset.quien;
+          marcar('[data-quien]', b, ['border-rose-400', 'bg-rose-50', 'text-rose-700']);
+        }));
+
         root.querySelectorAll('[data-motivo]').forEach((b) => b.addEventListener('click', () => {
           campo.value = b.dataset.motivo;
-          root.querySelectorAll('[data-motivo]').forEach((o) => {
-            const on = o === b;
-            o.classList.toggle('border-rose-400', on);
-            o.classList.toggle('bg-rose-50', on);
-            o.classList.toggle('text-rose-700', on);
-          });
+          campo.classList.remove('ring-2', 'ring-rose-400');
+          marcar('[data-motivo]', b, ['border-rose-400', 'bg-rose-50', 'text-rose-700']);
         }));
 
         root.querySelector('#btn-cancelar-cita').addEventListener('click', async (e) => {
           const boton = e.currentTarget;
           const avisar = !!(root.querySelector('#f-can-avisar') || {}).checked;
+
+          // Se comprueba aquí además de en la API para no gastar un viaje al
+          // servidor y para poder señalar el campo que falta.
+          if (!campo.value.trim()) {
+            campo.classList.add('ring-2', 'ring-rose-400');
+            campo.focus();
+            return toast('Escribe el motivo de la cancelación', 'warn');
+          }
+
           boton.disabled = true;
           boton.textContent = 'Cancelando…';
           try {
-            await API.cancelarCita(c.id, { motivo: campo.value.trim() });
+            await API.cancelarCita(c.id, { motivo: campo.value.trim(), quien });
             closeSheet();
             toast('Cita cancelada · horario liberado', 'warn');
             App.render();
@@ -2130,6 +2387,95 @@
             boton.disabled = false;
             boton.textContent = 'Cancelar cita';
             toast(err.message || 'No se pudo cancelar la cita', 'error', 4000);
+          }
+        });
+      }
+    });
+  }
+
+  /* --- Marcar falta ----------------------------------------------------
+     Una falta no es una cancelación y por eso tiene su propio diálogo: en
+     una cancelación alguien avisó y el hueco pudo reasignarse; en una falta
+     el horario se perdió sin remedio. La distinción es la que hace que el
+     porcentaje de cumplimiento del paciente signifique algo.
+     -------------------------------------------------------------------- */
+  const MOTIVOS_FALTA = ['No avisó', 'Avisó tarde', 'Se enfermó', 'Problema de transporte', 'Olvidó la cita'];
+
+  async function sheetMarcarFalta(citaId) {
+    const c = await API.obtenerCita(citaId);
+    if (!c) return toast('Cita no encontrada', 'error');
+
+    openSheet({
+      title: 'Marcar falta',
+      subtitle: `${c.paciente_nombre} · ${fmtDateTime(c.inicia_en)}`,
+      body: `
+        <div class="space-y-3">
+          <div class="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+            <p class="text-[12px] font-semibold leading-snug text-amber-900">
+              Queda registrada como <strong>no asistió</strong> y cuenta en su historial de
+              asistencia. El horario se libera igual, pero a diferencia de una cancelación
+              esta sí baja su porcentaje de cumplimiento.
+            </p>
+          </div>
+
+          <div>
+            <label class="mb-1.5 block text-[12px] font-bold text-ink-700">Motivo <span class="text-ink-400">(opcional)</span></label>
+            <div class="mb-2 flex flex-wrap gap-1.5">
+              ${MOTIVOS_FALTA.map((m) => `
+                <button type="button" data-motivo="${E(m)}"
+                  class="rounded-full border border-ink-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-ink-600 active:scale-95">
+                  ${E(m)}
+                </button>`).join('')}
+            </div>
+            <input id="f-falta-motivo" class="field" placeholder="O escríbelo con tus palabras" />
+          </div>
+
+          <label class="flex items-center gap-2.5 rounded-xl border border-ink-200 p-3">
+            <input id="f-falta-just" type="checkbox" class="h-5 w-5 rounded" />
+            <span class="text-[13px] font-bold text-ink-700">
+              Falta justificada
+              <span class="block text-[11px] font-medium text-ink-400">Avisó, aunque fuera tarde, o hubo una urgencia</span>
+            </span>
+          </label>
+        </div>`,
+      footer: `
+        <div class="flex gap-2">
+          <button data-sheet-close class="flex-1 rounded-xl bg-ink-100 py-3.5 text-[14px] font-bold text-ink-700 active:scale-[.98]">
+            Volver
+          </button>
+          <button id="btn-falta" class="flex-1 rounded-xl bg-amber-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">
+            Marcar falta
+          </button>
+        </div>`,
+      onMount: (root) => {
+        const campo = root.querySelector('#f-falta-motivo');
+        root.querySelectorAll('[data-motivo]').forEach((b) => b.addEventListener('click', () => {
+          campo.value = b.dataset.motivo;
+          root.querySelectorAll('[data-motivo]').forEach((o) => {
+            const on = o === b;
+            o.classList.toggle('border-amber-400', on);
+            o.classList.toggle('bg-amber-50', on);
+            o.classList.toggle('text-amber-700', on);
+            o.classList.toggle('border-ink-200', !on);
+          });
+        }));
+
+        root.querySelector('#btn-falta').addEventListener('click', async (e) => {
+          const boton = e.currentTarget;
+          boton.disabled = true;
+          boton.textContent = 'Guardando…';
+          try {
+            await API.marcarFalta(c.id, {
+              motivo: campo.value.trim(),
+              justificada: root.querySelector('#f-falta-just').checked
+            });
+            closeSheet();
+            toast('Falta registrada · horario liberado', 'warn');
+            App.render();
+          } catch (err) {
+            boton.disabled = false;
+            boton.textContent = 'Marcar falta';
+            toast(err.message || 'No se pudo registrar la falta', 'error', 4000);
           }
         });
       }
@@ -2516,21 +2862,43 @@
         ${list.length ? `
           <div class="space-y-2">
             ${list.map((r, i) => `
-              <div class="flex items-center gap-3 rounded-xl border border-ink-200 bg-white p-2.5">
-                <span class="w-5 shrink-0 text-center text-[12px] font-extrabold text-ink-400">${i + 1}</span>
-                ${avatar(r.nombre, 'h-9 w-9 text-[11px]')}
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-[13px] font-bold text-ink-800">${E(r.nombre)}</p>
-                  <p class="truncate text-[10.5px] font-medium text-ink-400">${E(r.boletos.slice(0, 4).join(' · '))}${r.boletos.length > 4 ? ` +${r.boletos.length - 4}` : ''}</p>
+              <details class="group rounded-xl border border-ink-200 bg-white">
+                <summary class="flex cursor-pointer list-none items-center gap-3 p-2.5">
+                  <span class="w-5 shrink-0 text-center text-[12px] font-extrabold text-ink-400">${i + 1}</span>
+                  ${avatar(r.nombre, 'h-9 w-9 text-[11px]')}
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-[13px] font-bold text-ink-800">${E(r.nombre)}</p>
+                    <p class="truncate text-[10.5px] font-medium text-ink-400">
+                      ${r.total} participación${r.total === 1 ? '' : 'es'}${r.total_anulados ? ` · ${r.total_anulados} anulada${r.total_anulados === 1 ? '' : 's'}` : ''}
+                    </p>
+                  </div>
+                  <span class="shrink-0 rounded-full bg-violet-100 px-2.5 py-1 text-[12px] font-extrabold text-violet-800">${r.total}</span>
+                  ${editable ? `
+                    <button data-quitar="${r.paciente_id}" data-nombre="${E(r.nombre)}" data-boletos="${r.total}"
+                      aria-label="Quitar del sorteo"
+                      class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-rose-50 text-rose-600 ring-1 ring-rose-200 active:scale-90">
+                      ${icon('ban', 'h-4 w-4')}
+                    </button>` : ''}
+                  <span class="shrink-0 text-ink-300 transition-transform group-open:rotate-180">${icon('chevronD', 'h-4 w-4')}</span>
+                </summary>
+
+                <!-- Un boleto por fila: quitar UNA participación (la asistencia
+                     que se registró por error) no es lo mismo que sacar a la
+                     persona de la rifa, y hasta ahora solo se podía lo segundo. -->
+                <div class="space-y-1 border-t border-ink-100 px-2.5 py-2">
+                  ${r.boletos.map((b) => `
+                    <div class="flex items-center gap-2 rounded-lg ${b.anulado ? 'bg-ink-50' : 'bg-white'} px-2 py-1.5">
+                      <span class="font-mono text-[11.5px] font-bold ${b.anulado ? 'text-ink-400 line-through' : 'text-ink-700'}">${E(b.codigo)}</span>
+                      <span class="min-w-0 flex-1 truncate text-[10.5px] font-medium text-ink-400">
+                        ${b.anulado ? `Anulada${b.motivo ? ` · ${E(b.motivo)}` : ''}` : E(fmtDate(b.creado_en))}
+                      </span>
+                      ${editable ? (b.anulado
+                        ? `<button data-restaurar="${b.id}" class="shrink-0 rounded-lg bg-white px-2 py-1 text-[11px] font-bold text-brand-700 ring-1 ring-ink-200 active:scale-95">Devolver</button>`
+                        : `<button data-anular="${b.id}" data-codigo="${E(b.codigo)}" data-nombre="${E(r.nombre)}"
+                             class="shrink-0 rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-600 ring-1 ring-rose-200 active:scale-95">Anular</button>`) : ''}
+                    </div>`).join('')}
                 </div>
-                <span class="shrink-0 rounded-full bg-violet-100 px-2.5 py-1 text-[12px] font-extrabold text-violet-800">${r.total}</span>
-                ${editable ? `
-                  <button data-quitar="${r.paciente_id}" data-nombre="${E(r.nombre)}" data-boletos="${r.total}"
-                    aria-label="Quitar del sorteo"
-                    class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-rose-50 text-rose-600 ring-1 ring-rose-200 active:scale-90">
-                    ${icon('ban', 'h-4 w-4')}
-                  </button>` : ''}
-              </div>`).join('')}
+              </details>`).join('')}
           </div>`
           : emptyState('ticket', 'Aún no hay boletos', 'Los boletos se emiten al registrar asistencias dentro del periodo.')}
 
@@ -2564,7 +2932,47 @@
             ahora no cambiaría el resultado.
           </p>` : ''}`,
       onMount: (root) => {
-        root.querySelectorAll('[data-quitar]').forEach((b) => b.addEventListener('click', async () => {
+        /* --- Anular UNA participación --------------------------------------
+           No se borra el boleto: nace de una asistencia que sigue existiendo y
+           la sincronización lo repondría al siguiente guardado del sorteo. Se
+           marca como anulado, y así la marca sobrevive. */
+        root.querySelectorAll('[data-anular]').forEach((b) => b.addEventListener('click', async (e) => {
+          e.preventDefault();               // no cerrar el <details>
+          const { anular, codigo, nombre } = b.dataset;
+          b.disabled = true;
+          b.textContent = '…';
+          try {
+            await API.anularBoleto(anular, { motivo: 'Anulada desde el panel' });
+            toast(`Boleto ${codigo} de ${nombre} anulado`);
+            closeSheet();
+            App.render();
+            sheetParticipantes(sorteoId);
+          } catch (err) {
+            b.disabled = false;
+            b.textContent = 'Anular';
+            toast(err.message || 'No se pudo anular la participación', 'error', 5000);
+          }
+        }));
+
+        root.querySelectorAll('[data-restaurar]').forEach((b) => b.addEventListener('click', async (e) => {
+          e.preventDefault();
+          b.disabled = true;
+          b.textContent = '…';
+          try {
+            await API.restaurarBoleto(b.dataset.restaurar);
+            toast('Participación devuelta');
+            closeSheet();
+            App.render();
+            sheetParticipantes(sorteoId);
+          } catch (err) {
+            b.disabled = false;
+            b.textContent = 'Devolver';
+            toast(err.message || 'No se pudo devolver la participación', 'error', 4500);
+          }
+        }));
+
+        root.querySelectorAll('[data-quitar]').forEach((b) => b.addEventListener('click', async (e) => {
+          e.preventDefault();               // el botón vive dentro de un <summary>
           const { quitar, nombre, boletos } = b.dataset;
           closeSheet();                       // confirmSheet reemplaza el panel
 
@@ -3052,8 +3460,221 @@
   /* ======================================================================
      EXPORT
      ====================================================================== */
+  /* ======================================================================
+     CATÁLOGO DE EJERCICIOS  ·  alta, edición y foto
+
+     El catálogo que viene con el sistema es un punto de partida, no un techo:
+     cada clínica trabaja con su material y sus variantes. Y la foto real vale
+     bastante más que una miniatura genérica cuando el paciente intenta
+     acordarse del ejercicio en su casa, tres días después.
+     ====================================================================== */
+  async function sheetCatalogoEjercicios() {
+    const list = await API.listarEjercicios({ incluirInactivos: true });
+    const porCategoria = {};
+    list.forEach((ex) => (porCategoria[ex.categoria] = porCategoria[ex.categoria] || []).push(ex));
+
+    openSheet({
+      title: 'Catálogo de ejercicios',
+      subtitle: `${list.filter((e) => e.activo).length} activos · ${list.filter((e) => e.propio).length} propios`,
+      size: 'tall',
+      body: `
+        <button id="btn-nuevo-ej"
+          class="mb-3 flex w-full items-center gap-3 rounded-xl border border-dashed border-brand-300 bg-brand-50/60 p-3 text-left active:scale-[.99]">
+          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-600 text-white">${icon('plus', 'h-4 w-4')}</span>
+          <span class="text-[13.5px] font-extrabold text-brand-800">Nuevo ejercicio</span>
+        </button>
+
+        ${Object.keys(porCategoria).sort().map((cat) => `
+          <div class="mb-3">
+            ${sectionTitle(cat)}
+            <div class="space-y-1.5">
+              ${porCategoria[cat].map((ex) => `
+                <button data-editar-ej="${E(ex.id)}"
+                  class="flex w-full items-center gap-2.5 rounded-xl border border-ink-200 bg-white p-2 text-left active:bg-ink-50 ${ex.activo ? '' : 'opacity-55'}">
+                  <img src="${E(ex.image_url || placeholderImage(ex.nombre, ex.categoria))}" alt=""
+                       class="h-11 w-14 shrink-0 rounded-lg object-cover" loading="lazy" />
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-[12.5px] font-bold text-ink-800">${E(ex.nombre)}</span>
+                    <span class="block truncate text-[10.5px] font-medium text-ink-400">
+                      ${ex.sets}×${ex.reps}${ex.hold ? ` · ${ex.hold}s` : ''}${ex.activo ? '' : ' · desactivado'}
+                    </span>
+                  </span>
+                  ${ex.propio ? badge('Propio', 'brand') : ''}
+                  <span class="shrink-0 text-ink-300">${icon('chevronR', 'h-4 w-4')}</span>
+                </button>`).join('')}
+            </div>
+          </div>`).join('')}`,
+      onMount: (root) => {
+        root.querySelector('#btn-nuevo-ej').addEventListener('click', () => sheetEjercicio(null));
+        root.querySelectorAll('[data-editar-ej]').forEach((b) => b.addEventListener('click', () =>
+          sheetEjercicio(list.find((e) => e.id === b.dataset.editarEj))));
+      }
+    });
+  }
+
+  /** Alta o edición de un ejercicio, con su foto. */
+  async function sheetEjercicio(ex) {
+    const esNuevo = !ex;
+    // `foto` guarda el dataURL nuevo mientras no se guarde: null = no se
+    // tocó, '' = se pidió quitarla.
+    let foto = null;
+
+    openSheet({
+      title: esNuevo ? 'Nuevo ejercicio' : 'Editar ejercicio',
+      subtitle: esNuevo ? 'Se añade a tu catálogo' : ex.nombre,
+      size: 'tall',
+      body: `
+        <div class="space-y-3">
+          <div>
+            <label class="mb-1.5 block text-[12px] font-bold text-ink-700">Foto</label>
+            <div class="flex items-center gap-3">
+              <img id="ej-foto" src="${E((ex && ex.image_url) || placeholderImage(ex ? ex.nombre : 'Nuevo', ex ? ex.categoria : 'Movilidad'))}"
+                   alt="" class="h-20 w-24 shrink-0 rounded-xl border border-ink-200 object-cover" />
+              <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+                <label class="cursor-pointer rounded-xl bg-brand-600 px-3 py-2.5 text-center text-[12.5px] font-extrabold text-white active:scale-95">
+                  ${ex && ex.image_url ? 'Cambiar foto' : 'Subir foto'}
+                  <input id="ej-file" type="file" accept="image/*" class="sr-only" />
+                </label>
+                ${ex && ex.image_url ? `
+                  <button id="ej-quitar-foto" class="rounded-xl bg-ink-100 px-3 py-2 text-[12px] font-bold text-ink-600 active:scale-95">
+                    Quitar foto
+                  </button>` : ''}
+                <p class="text-[10.5px] leading-snug text-ink-400">
+                  Se reduce a 900 px antes de subirse para que abra rápido en el móvil del paciente.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">Nombre *</label>
+            <input id="ej-nombre" class="field" value="${E(ex ? ex.nombre : '')}" placeholder="Ej. Puente de glúteo a una pierna" />
+          </div>
+
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">Categoría *</label>
+            <select id="ej-cat" class="field">
+              ${Store.CATEGORIAS_EJERCICIO.map((c) => `<option ${ex && ex.categoria === c ? 'selected' : ''}>${E(c)}</option>`).join('')}
+            </select>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">Descripción</label>
+            <textarea id="ej-desc" class="field" placeholder="Cómo se ejecuta, en una o dos frases.">${E(ex ? ex.descripcion : '')}</textarea>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-[12px] font-bold text-ink-700">Indicación clave</label>
+            <input id="ej-cue" class="field" value="${E(ex ? ex.cue : '')}" placeholder="Ej. No arquees la lumbar." />
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Series</label>
+              <input id="ej-sets" type="number" min="0" class="field" value="${ex ? ex.sets : 3}" /></div>
+            <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Reps</label>
+              <input id="ej-reps" type="number" min="0" class="field" value="${ex ? ex.reps : 10}" /></div>
+            <div><label class="mb-1 block text-[11px] font-bold text-ink-600">Hold (s)</label>
+              <input id="ej-hold" type="number" min="0" class="field" value="${ex ? ex.hold : 0}" /></div>
+          </div>
+
+          ${!esNuevo ? `
+            <label class="flex items-center gap-2.5 rounded-xl border border-ink-200 p-3">
+              <input id="ej-activo" type="checkbox" ${ex.activo ? 'checked' : ''} class="h-5 w-5 rounded" />
+              <span class="text-[13px] font-bold text-ink-700">
+                Disponible en el generador de rutinas
+                <span class="block text-[11px] font-medium text-ink-400">
+                  Apágalo para retirarlo sin romper las rutinas que ya lo usan.
+                </span>
+              </span>
+            </label>
+            <button id="ej-borrar" class="w-full rounded-xl bg-rose-50 py-3 text-[13px] font-bold text-rose-600 active:scale-[.98]">
+              Eliminar del catálogo
+            </button>` : ''}
+        </div>`,
+      footer: `<button id="ej-guardar" class="w-full rounded-xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">
+                 ${esNuevo ? 'Añadir al catálogo' : 'Guardar cambios'}</button>`,
+      onMount: (root) => {
+        const img = root.querySelector('#ej-foto');
+
+        root.querySelector('#ej-file').addEventListener('change', async (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          try {
+            // Se comprime en el navegador, igual que las evidencias: una foto
+            // de 8 MB del móvil tarda en abrirse justo cuando el paciente la
+            // necesita, en mitad de su rutina.
+            foto = await readImageCompressed(file, 900, 0.72);
+            img.src = foto;
+          } catch (err) {
+            toast('No se pudo leer la imagen', 'error');
+          }
+        });
+
+        const quitar = root.querySelector('#ej-quitar-foto');
+        if (quitar) quitar.addEventListener('click', () => {
+          foto = '';
+          img.src = placeholderImage(val(root, '#ej-nombre') || 'Ejercicio', val(root, '#ej-cat'));
+          toast('La foto se quitará al guardar', 'warn');
+        });
+
+        const borrar = root.querySelector('#ej-borrar');
+        if (borrar) borrar.addEventListener('click', async () => {
+          closeSheet();
+          const ok = await confirmSheet({
+            title: `Eliminar «${ex.nombre}»`,
+            message: 'Si alguna rutina lo usa se desactivará en vez de borrarse, para no dejar ' +
+                     'huecos en las rutinas ya entregadas.',
+            confirmText: 'Eliminar',
+            tone: 'danger'
+          });
+          if (!ok) return sheetCatalogoEjercicios();
+          try {
+            const r = await API.eliminarEjercicio(ex.id);
+            toast(r.borrado
+              ? 'Ejercicio eliminado'
+              : `Se usa en ${r.rutinas} rutina(s): se desactivó en vez de borrarse`, r.borrado ? 'success' : 'warn', 5000);
+          } catch (e2) {
+            toast(e2.message || 'No se pudo eliminar', 'error', 4500);
+          }
+          sheetCatalogoEjercicios();
+        });
+
+        root.querySelector('#ej-guardar').addEventListener('click', async (e) => {
+          const boton = e.currentTarget;
+          const nombre = val(root, '#ej-nombre');
+          if (!nombre) return toast('El ejercicio necesita un nombre', 'error');
+
+          boton.disabled = true;
+          boton.textContent = 'Guardando…';
+          try {
+            await API.guardarEjercicio({
+              id: esNuevo ? null : ex.id,
+              nombre,
+              categoria: val(root, '#ej-cat'),
+              descripcion: val(root, '#ej-desc'),
+              cue: val(root, '#ej-cue'),
+              sets: Number(val(root, '#ej-sets')) || 0,
+              reps: Number(val(root, '#ej-reps')) || 0,
+              hold: Number(val(root, '#ej-hold')) || 0,
+              activo: esNuevo ? true : root.querySelector('#ej-activo').checked,
+              foto
+            });
+            closeSheet();
+            toast(esNuevo ? 'Ejercicio añadido al catálogo' : 'Ejercicio actualizado');
+            sheetCatalogoEjercicios();
+          } catch (err) {
+            boton.disabled = false;
+            boton.textContent = esNuevo ? 'Añadir al catálogo' : 'Guardar cambios';
+            toast(err.message || 'No se pudo guardar el ejercicio', 'error', 5000);
+          }
+        });
+      }
+    });
+  }
+
   global.VistaFisio = {
     dashboard, agenda, pacientes, paciente, valoracion, rutinaEditor, sorteos,
+    sheetCatalogoEjercicios, sheetEjercicio, sheetMarcarFalta,
     leerValoracion, rutinaEnEdicion, hayCambiosSinGuardar, marcarLimpio,
     sheetPaciente, sheetCita, sheetMenuCita, sheetCancelarCita, sheetAsistencia,
     sheetNota, sheetFoto, verArchivo, subirArchivosExpediente,

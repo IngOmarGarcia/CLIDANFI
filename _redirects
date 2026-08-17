@@ -1,0 +1,13 @@
+# CLIDANFI · enrutado en Cloudflare Pages
+#
+# El router es por hash (#/t/dashboard), así que en la práctica no hacen falta
+# reescrituras: el servidor solo ve «/». Este catch-all está para que una ruta
+# suelta escrita a mano no devuelva un 404 desnudo.
+#
+# El 200 (y no un 301) es lo que hace que la barra de direcciones conserve lo
+# que el usuario escribió en vez de saltar a la raíz.
+#
+# Cloudflare atiende primero los archivos que existen, así que /sw.js, /js/* y
+# /assets/* se sirven tal cual y no caen aquí.
+
+/*    /index.html    200

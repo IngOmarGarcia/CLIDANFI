@@ -1,0 +1,50 @@
+#===============================================================================
+# CLIDANFI · cabeceras para Cloudflare Pages
+#
+# Cloudflare NO lee `netlify.toml`. Sin este archivo el sitio se publica sin
+# CSP, sin HSTS y sin X-Frame-Options: nada falla a la vista, y esa es
+# justamente la parte mala. Es la traducción de lo que había en netlify.toml.
+#
+# Va en la RAÍZ del proyecto; `scripts/build.js` lo copia a dist/.
+#
+# Sobre la CSP:
+#   · 'unsafe-inline' en script-src hace falta por los handlers inline del
+#     shell; si se eliminan, endurece la línea quitándolo.
+#   · `data:` y `blob:` van en connect-src, no en img-src: el navegador trata
+#     `fetch('data:…')` como una CONEXIÓN. Sin ellos, subir el logo o un
+#     adjunto moría con «TypeError: Failed to fetch» sin llegar a Supabase.
+#   · `worker-src 'self'` es nuevo y es imprescindible: sin él el navegador
+#     bloquea el registro de /sw.js y las notificaciones no se pueden
+#     activar. El fallo sale como un SecurityError que no menciona la CSP.
+#===============================================================================
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), microphone=(), geolocation=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' data: blob: https://*.supabase.co wss://*.supabase.co; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+
+# El HTML nunca se cachea, para que un despliegue se vea al instante.
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/js/env.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# El service worker TAMPOCO: si se cacheara, el fisio podría quedarse horas
+# con la versión vieja del manejador de notificaciones, y los avisos llegarían
+# con el comportamiento anterior sin que nada lo delatara.
+
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Los estáticos sí, y se invalidan solos porque cambian de contenido.
+
+/css/*
+  Cache-Control: public, max-age=604800
+
+/assets/*
+  Cache-Control: public, max-age=604800

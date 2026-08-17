@@ -396,15 +396,106 @@
                 <span class="block text-[13.5px] font-bold text-ink-800">Personalizar clínica</span>
                 <span class="block text-[11.5px] leading-snug text-ink-500">Logo, nombre, lema y precio de sesión</span>
               </span>
-            </button>` : ''}
+            </button>
+
+            <button data-action="abrir-ejercicios" class="flex w-full items-center gap-3 rounded-xl border border-ink-200 p-3 text-left active:bg-ink-50">
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-700">${icon('dumbbell', 'h-4 w-4')}</span>
+              <span class="min-w-0">
+                <span class="block text-[13.5px] font-bold text-ink-800">Catálogo de ejercicios</span>
+                <span class="block text-[11.5px] leading-snug text-ink-500">Añade los tuyos, edítalos y ponles foto</span>
+              </span>
+            </button>
+
+            <!-- Notificaciones. El interruptor se pinta apagado y lo corrige
+                 al montar montarInterruptorPush, porque saber si este aparato
+                 está suscrito exige preguntarle al navegador: es asíncrono. -->
+            <div id="bloque-push" class="rounded-xl border border-ink-200 p-3">
+              <div class="flex items-center gap-3">
+                <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-100 text-violet-700">${icon('bell', 'h-4 w-4')}</span>
+                <div class="min-w-0 flex-1">
+                  <p class="text-[13.5px] font-bold text-ink-800">Avisos en este aparato</p>
+                  <p id="push-estado" class="text-[11.5px] leading-snug text-ink-500">Comprobando…</p>
+                </div>
+                <label class="relative inline-flex shrink-0 cursor-pointer items-center">
+                  <input id="push-toggle" type="checkbox" class="peer sr-only" disabled />
+                  <span class="h-6 w-11 rounded-full bg-ink-200 transition peer-checked:bg-violet-600 peer-disabled:opacity-40"></span>
+                  <span class="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+                </label>
+              </div>
+              <p class="mt-2 text-[11px] leading-snug text-ink-400">
+                Resumen de las citas de mañana a las 6 p.m. y aviso 40 min antes de cada sesión.
+                Hay que activarlo en cada teléfono u ordenador por separado.
+              </p>
+            </div>` : ''}
 
           <button data-action="cerrar-sesion" class="flex w-full items-center gap-3 rounded-xl border border-rose-200 p-3 text-left active:bg-rose-50">
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-rose-100 text-rose-600">${icon('logout', 'h-4 w-4')}</span>
             <span class="text-[13.5px] font-bold text-rose-600">Cerrar sesión</span>
           </button>
         </div>`,
-      onMount: (root) => root.querySelectorAll('[data-action]').forEach((b) =>
-        b.addEventListener('click', () => closeSheet()))
+      onMount: (root) => {
+        root.querySelectorAll('[data-action]').forEach((b) =>
+          b.addEventListener('click', () => closeSheet()));
+        if (esFisio) montarInterruptorPush(root);
+      }
+    });
+  }
+
+  /* ----------------------------------------------------------------------
+     Interruptor de notificaciones
+
+     Se monta aparte porque su estado no se puede saber al pintar: hay que
+     preguntarle al navegador si este aparato está suscrito, y eso es una
+     promesa. Pintarlo apagado y corregirlo aquí evita el parpadeo de un
+     interruptor que aparece encendido y se apaga solo medio segundo después.
+     ---------------------------------------------------------------------- */
+  async function montarInterruptorPush(root) {
+    const toggle = root.querySelector('#push-toggle');
+    const texto = root.querySelector('#push-estado');
+    if (!toggle || !texto) return;
+
+    const clave = (global.CLIDANFI_ENV || {}).VAPID_PUBLIC_KEY || '';
+
+    const pintar = (msg, activo, habilitado = true) => {
+      texto.textContent = msg;
+      toggle.checked = activo;
+      toggle.disabled = !habilitado;
+    };
+
+    const estado = await UI.estadoPush();
+
+    if (!estado.disponible) {
+      return pintar('Este navegador no admite avisos. En iPhone, añade CLIDANFI a la pantalla de inicio.', false, false);
+    }
+    if (!clave) {
+      return pintar('Falta la clave VAPID del sitio. Configúrala en Cloudflare Pages.', false, false);
+    }
+    if (estado.permiso === 'denied') {
+      return pintar('Bloqueados por el navegador. Habilítalos desde el candado de la barra de direcciones.', false, false);
+    }
+
+    pintar(estado.activo ? 'Activos en este aparato' : 'Apagados en este aparato', estado.activo);
+
+    toggle.addEventListener('change', async () => {
+      const encender = toggle.checked;
+      toggle.disabled = true;
+      texto.textContent = encender ? 'Activando…' : 'Desactivando…';
+
+      try {
+        if (encender) {
+          const r = await UI.activarPush(clave);
+          if (!r.ok) return pintar(r.motivo, false, r.motivo.indexOf('Bloqueaste') === -1);
+          pintar('Activos en este aparato', true);
+          toast('Avisos activados en este aparato');
+        } else {
+          await UI.desactivarPush();
+          pintar('Apagados en este aparato', false);
+          toast('Avisos desactivados en este aparato', 'warn');
+        }
+      } catch (e) {
+        pintar(e.message || 'No se pudo cambiar el ajuste', !encender);
+        toast(e.message || 'No se pudo cambiar el ajuste', 'error', 5000);
+      }
     });
   }
 
@@ -415,6 +506,7 @@
     /* --- sesión y navegación --- */
     'abrir-cuenta':  () => sheetCuenta(),
     'abrir-clinica': () => VistaFisio.sheetClinica(),
+    'abrir-ejercicios': () => VistaFisio.sheetCatalogoEjercicios(),
     'cerrar-sesion': () => salir(),
     'ir-inicio':     () => { location.hash = INICIO[rol()] || ''; render(); },
     'volver':        async (el) => {
@@ -552,6 +644,50 @@
      ARRANQUE
      ====================================================================== */
   window.addEventListener('hashchange', () => { closeSheet(); render(); });
+
+  /* ======================================================================
+     MENSAJES DEL SERVICE WORKER
+
+     El service worker recibe las notificaciones que manda el Worker de
+     Cloudflare, pero no tiene sesión de Supabase ni acceso al router: para
+     cualquier cosa que necesite una u otro, habla con la pestaña.
+     ====================================================================== */
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', async (e) => {
+      const msg = e.data || {};
+      if (msg.fuente !== 'clidanfi-sw') return;
+
+      // El fisio tocó una notificación con CLIDANFI ya abierto. Se navega en
+      // caliente en vez de recargar, y se respeta la guardia de cambios sin
+      // guardar: perder una valoración a medias por tocar un aviso sería la
+      // peor forma posible de enterarse de la próxima cita.
+      if (msg.accion === 'navegar' && msg.url) {
+        const destino = String(msg.url).replace(/^.*#/, '#');
+        if (!(await confirmarSalida())) return;
+        if (location.hash !== destino) location.hash = destino;
+        else render();
+        // Los datos del aviso (los pacientes con su enlace de WhatsApp ya
+        // redactado) se dejan a mano para que la agenda pueda ofrecerlos.
+        if (msg.datos && msg.datos.pacientes && msg.datos.pacientes.length) {
+          global.__avisoPush = msg.datos;
+        }
+        return;
+      }
+
+      // El servicio push rotó la suscripción por su cuenta. Sin volver a
+      // registrarla, este aparato dejaría de recibir en silencio: el
+      // navegador se cree suscrito y el Worker manda a un endpoint muerto.
+      if (msg.accion === 'resuscribir' && msg.nueva) {
+        try {
+          if (msg.anterior) await API.bajaPush(msg.anterior).catch(() => {});
+          await API.registrarPush(msg.nueva, { agente: navigator.userAgent });
+          console.info('[CLIDANFI] Suscripción push renovada.');
+        } catch (err) {
+          console.warn('[CLIDANFI] No se pudo renovar la suscripción push:', err.message);
+        }
+      }
+    });
+  }
 
   /* ======================================================================
      CAMBIOS SIN GUARDAR

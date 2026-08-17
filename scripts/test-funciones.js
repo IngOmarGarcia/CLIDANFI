@@ -97,6 +97,16 @@ function montarAPI({ respuestas = {}, storage = {} } = {}) {
       normalize: (s) => String(s || ''),
       uid: (p) => `${p}-1`
     },
+    // El catálogo clínico. `api.js` lo consulta para no dejar añadir una
+    // opción de valoración que ya venía de fábrica.
+    Store: {
+      CATALOGO_EJERCICIOS: [{ id: 'ex_01', nombre: 'Chin tuck', categoria: 'Cervical', sets: 3, reps: 10, hold: 5 }],
+      CATEGORIAS_EJERCICIO: ['Cervical', 'Lumbar'],
+      CAMPOS_AMPLIABLES: ['select', 'checks', 'tests'],
+      opcionesDeCampo: (sec, campo) =>
+        (sec === 'antecedentes' && campo === 'patologicos') ? ['Diabetes', 'Hipertensión'] : [],
+      ejercicio: (id) => (id === 'ex_01' ? { id, nombre: 'Chin tuck', categoria: 'Cervical' } : null)
+    },
     Blob, atob, btoa, Uint8Array, TextDecoder, decodeURIComponent, encodeURIComponent,
     setTimeout, clearTimeout, Promise, Date, Math, JSON, Number, String, Object,
     Array, Error, TypeError, RegExp, Set, Map, Buffer, isNaN
@@ -372,6 +382,229 @@ const argsDe = (entrada, metodo) => (entrada.ops.find(([m]) => m === metodo) || 
 
     const conSaltos = waLink('6671234567', 'Línea 1\nLínea 2');
     check(!/\n/.test(conSaltos) && /%0A/.test(conSaltos), 'los saltos de línea del mensaje se codifican');
+  }
+
+  /* ======================================================================
+     12 · BITÁCORA DE CANCELACIÓN
+     Sin motivo, una cita cancelada es indistinguible de un hueco cualquiera
+     tres meses después, que es justo cuando hace falta saber si el paciente
+     abandonó el tratamiento.
+     ====================================================================== */
+  console.log('\n12 · Cancelar deja constancia de quién y por qué');
+  {
+    const { API, registro } = montarAPI({
+      respuestas: { perfiles: PERFIL_FISIO, citas: () => ({ data: { id: 'c1' }, error: null }) }
+    });
+
+    check(/motivo/i.test(await capturar(() => API.cancelarCita('c1', { motivo: '   ' }))),
+      'sin motivo no se cancela');
+    check(!ultima(registro, 'citas', 'update'), 'y no se tocó la cita');
+
+    await API.cancelarCita('c1', { motivo: 'Se va de viaje', quien: 'Paciente' });
+    const patch = argsDe(ultima(registro, 'citas', 'update'), 'update');
+    check(patch.cancelada_por === 'Paciente', 'se guarda quién decidió cancelar');
+    check(patch.motivo_cancelacion === 'Se va de viaje', 'y la razón');
+    check(patch.cancelada_por_usuario === 'u1', 'se sella qué usuario lo tecleó, sin preguntárselo');
+
+    await API.cancelarCita('c1', { motivo: 'Otro', quien: 'InventadoPorAlguien' });
+    const p2 = argsDe(ultima(registro, 'citas', 'update'), 'update');
+    check(p2.cancelada_por === 'Otro', 'un responsable fuera de catálogo cae en «Otro»');
+  }
+
+  /* ======================================================================
+     13 · FALTAS  ≠  CANCELACIONES
+     ====================================================================== */
+  console.log('\n13 · Marcar falta al paciente');
+  {
+    const { API, registro } = montarAPI({
+      respuestas: {
+        perfiles: PERFIL_FISIO,
+        citas: (e) => e.ops.some(([m]) => m === 'select' || m === 'update')
+          ? { data: [
+              { id: 'x1', estado: 'completada', inicia_en: '2026-01-05T16:00:00.000Z' },
+              { id: 'x2', estado: 'completada', inicia_en: '2026-01-06T16:00:00.000Z' },
+              { id: 'x3', estado: 'no_asistio', inicia_en: '2026-01-07T16:00:00.000Z' },
+              { id: 'x4', estado: 'cancelada',  inicia_en: '2026-01-08T16:00:00.000Z' }
+            ], error: null }
+          : { data: [], error: null }
+      }
+    });
+
+    await API.marcarFalta('c1', { motivo: 'No avisó', justificada: false });
+    const patch = argsDe(ultima(registro, 'citas', 'update'), 'update');
+    check(patch.estado === 'no_asistio', 'la cita queda como «no asistió»');
+    check(!!patch.falta_en, 'se sella cuándo se registró la falta');
+    check(patch.motivo_falta === 'No avisó' && patch.falta_justificada === false, 'se guardan motivo y matiz');
+
+    const c = await API.cumplimientoDePaciente('p1');
+    check(c.asistidas === 2 && c.faltas === 1 && c.canceladas === 1,
+      `se cuentan por separado (${c.asistidas}/${c.faltas}/${c.canceladas})`);
+    // 2 de 3 = 67 %. Si las canceladas penalizaran serían 2 de 4 = 50 %.
+    check(c.cumplimiento === 67,
+      `cancelar no baja el cumplimiento: avisar es lo que se quiere fomentar (${c.cumplimiento}%)`);
+  }
+
+  /* ======================================================================
+     14 · ANULAR UNA PARTICIPACIÓN, NO A LA PERSONA
+     ====================================================================== */
+  console.log('\n14 · Quitar un boleto suelto de una rifa');
+  {
+    const { API, registro } = montarAPI({
+      respuestas: { perfiles: PERFIL_FISIO, boletos: () => ({ data: { id: 'b1', anulado_en: 'x' }, error: null }) }
+    });
+
+    await API.anularBoleto('b1', { motivo: 'Asistencia duplicada' });
+    const upd = ultima(registro, 'boletos', 'update');
+    const patch = argsDe(upd, 'update');
+
+    check(!!patch.anulado_en, 'el boleto queda marcado como anulado');
+    check(patch.motivo_anulacion === 'Asistencia duplicada', 'con su motivo');
+    check(patch.anulado_por === 'u1', 'y con quién lo anuló');
+    // Lo esencial: si se BORRARA, `sincronizar_boletos` lo repondría en el
+    // siguiente guardado del sorteo, porque su asistencia sigue existiendo.
+    check(!upd.ops.some(([m]) => m === 'delete'),
+      'NO se borra la fila: si se borrara, la sincronización lo repondría');
+
+    await API.restaurarBoleto('b1');
+    const vuelta = argsDe(ultima(registro, 'boletos', 'update'), 'update');
+    check(vuelta.anulado_en === null, 'devolver la participación limpia la marca');
+  }
+
+  console.log('\n15 · Sin las columnas de anulación se avisa en vez de fallar raro');
+  {
+    const { API } = montarAPI({
+      respuestas: {
+        perfiles: PERFIL_FISIO,
+        boletos: () => ({ data: null, error: { code: 'PGRST204', message: "Could not find the 'anulado_en' column of 'boletos'" } })
+      }
+    });
+    const err = await capturar(() => API.anularBoleto('b1'));
+    check(/schema\.sql/.test(err), `el mensaje dice cómo arreglarlo (${err})`);
+  }
+
+  /* ======================================================================
+     16 · CATÁLOGO DE EJERCICIOS EDITABLE
+     ====================================================================== */
+  console.log('\n16 · Alta y edición de ejercicios');
+  {
+    const { API, registro, subidas } = montarAPI({
+      respuestas: {
+        perfiles: PERFIL_FISIO,
+        ejercicios: () => ({ data: { id: 'ej_x-1', nombre: 'Puente a una pierna' }, error: null }),
+        rutina_items: () => ({ data: [], error: null, count: 0 })
+      }
+    });
+
+    check(/nombre/i.test(await capturar(() => API.guardarEjercicio({ nombre: '  ' }))), 'sin nombre no se guarda');
+    check(/categor/i.test(await capturar(() => API.guardarEjercicio({ nombre: 'X', categoria: '' }))), 'sin categoría tampoco');
+
+    await API.guardarEjercicio({
+      nombre: '  Puente a una pierna ', categoria: 'Lumbar', sets: 3, reps: 12,
+      foto: 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+    });
+
+    check(subidas.length === 1 && subidas[0].bucket === 'ejercicios', 'la foto sube al bucket `ejercicios`');
+    const fila = argsDe(ultima(registro, 'ejercicios', 'upsert'), 'upsert');
+    check(fila.nombre === 'Puente a una pierna', 'el nombre se limpia de espacios');
+    check(fila.propio === true, 'queda marcado como propio de la clínica');
+    check(/^ej_/.test(fila.id), `el id nuevo no puede chocar con los del catálogo base (${fila.id})`);
+    check(!!fila.image_url && !!fila.image_ruta, 'se guardan la url pública y la ruta del objeto');
+  }
+
+  console.log('\n17 · Un ejercicio en uso se desactiva, no se borra');
+  {
+    const { API, registro } = montarAPI({
+      respuestas: {
+        perfiles: PERFIL_FISIO,
+        // 2 rutinas lo usan
+        rutina_items: () => ({ data: [], error: null, count: 2 }),
+        ejercicios: () => ({ data: { id: 'ex_01' }, error: null })
+      }
+    });
+
+    const r = await API.eliminarEjercicio('ex_01');
+    check(r.borrado === false && r.desactivado === true, 'no se borra');
+    check(r.rutinas === 2, 'y se dice en cuántas rutinas se usa');
+    check(argsDe(ultima(registro, 'ejercicios', 'update'), 'update').activo === false,
+      'se desactiva: las rutinas ya entregadas no pueden quedar con un hueco');
+  }
+
+  /* ======================================================================
+     18 · OPCIONES PERSONALIZADAS DE LA VALORACIÓN
+     ====================================================================== */
+  console.log('\n18 · Ampliar una lista de la valoración');
+  {
+    const { API, registro } = montarAPI({
+      respuestas: {
+        perfiles: PERFIL_FISIO,
+        valoracion_opciones: () => ({ data: { id: 'vo1' }, error: null })
+      }
+    });
+
+    check(/opción|opcion/i.test(await capturar(() => API.agregarOpcionValoracion('antecedentes', 'patologicos', '  '))),
+      'una opción vacía se rechaza');
+
+    // El catálogo base ya trae «Diabetes»: añadirla otra vez la duplicaría en
+    // pantalla, así que se detecta antes de tocar la base.
+    const ya = await API.agregarOpcionValoracion('antecedentes', 'patologicos', 'diabetes');
+    check(ya.ya === true, 'no se duplica algo que ya viene en el catálogo base');
+    check(!ultima(registro, 'valoracion_opciones', 'insert'), 'y no se escribió nada');
+
+    const nueva = await API.agregarOpcionValoracion('antecedentes', 'patologicos', 'Fibromialgia');
+    check(nueva.ya === false, 'una opción nueva sí se guarda');
+    const fila = argsDe(ultima(registro, 'valoracion_opciones', 'insert'), 'insert');
+    check(fila.seccion === 'antecedentes' && fila.campo === 'patologicos' && fila.valor === 'Fibromialgia',
+      'se guarda con la ruta del campo al que pertenece');
+  }
+
+  console.log('\n19 · Opciones repetidas y base sin la tabla');
+  {
+    const { API } = montarAPI({
+      respuestas: {
+        perfiles: PERFIL_FISIO,
+        valoracion_opciones: () => ({ data: null, error: { code: '23505', message: 'duplicate key value' } })
+      }
+    });
+    const r = await API.agregarOpcionValoracion('dolor', 'tipo', 'Punzante');
+    check(r.ya === true, 'añadir dos veces la misma no es un error: se avisa y ya');
+
+    const { API: API2 } = montarAPI({
+      respuestas: {
+        perfiles: PERFIL_FISIO,
+        valoracion_opciones: () => ({ data: null, error: { code: '42P01', message: 'relation "valoracion_opciones" does not exist' } })
+      }
+    });
+    check(/schema\.sql/.test(await capturar(() => API2.agregarOpcionValoracion('dolor', 'tipo', 'Urente'))),
+      'sin la tabla, el mensaje dice qué ejecutar');
+    check((await API2.opcionesValoracion()) && Object.keys(await API2.opcionesValoracion()).length === 0,
+      'y leerlas devuelve vacío en vez de tumbar la valoración');
+  }
+
+  /* ======================================================================
+     20 · SUSCRIPCIÓN PUSH
+     ====================================================================== */
+  console.log('\n20 · Registro de un aparato para los avisos');
+  {
+    const { API, registro } = montarAPI({
+      respuestas: { perfiles: PERFIL_FISIO, push_suscripciones: () => ({ data: { id: 'ps1' }, error: null }) }
+    });
+
+    check(!!(await capturar(() => API.registrarPush({ endpoint: 'https://x/y' }))),
+      'una suscripción sin claves se rechaza');
+
+    await API.registrarPush({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/AAA',
+      keys: { p256dh: 'BPk...', auth: 'k9...' }
+    }, { agente: 'Chrome/Android' });
+
+    const up = ultima(registro, 'push_suscripciones', 'upsert');
+    const fila = argsDe(up, 'upsert');
+    check(fila.endpoint === 'https://fcm.googleapis.com/fcm/send/AAA', 'se guarda el endpoint del navegador');
+    check(fila.usuario_id === 'u1', 'atada al usuario en sesión, no al que diga el cliente');
+    check(fila.p256dh === 'BPk...' && fila.auth === 'k9...', 'con sus dos claves de cifrado');
+    // Si fuera insert, volver a conceder el permiso reventaría por unicidad
+    // justo cuando el usuario acaba de decir que sí.
+    check(!up.ops.some(([m]) => m === 'insert'), 'es upsert: reactivar el permiso no puede fallar por duplicado');
   }
 
   console.log(`\n${'─'.repeat(60)}\n${pasan} pasan · ${fallan} fallan\n`);

@@ -113,6 +113,105 @@
     return `https://wa.me/${n}${mensaje ? `?text=${encodeURIComponent(mensaje)}` : ''}`;
   };
 
+  /* ======================================================================
+     NOTIFICACIONES PUSH  ·  el lado del navegador
+
+     Registra el service worker y suscribe este aparato. Quien manda los
+     avisos es el Worker de Cloudflare: aquí solo se pide permiso y se guarda
+     la suscripción, porque a las 18:00 o 40 minutos antes de una sesión no
+     hay ninguna garantía de que la aplicación esté abierta.
+     ====================================================================== */
+
+  /**
+   * La clave pública VAPID en el formato que exige `applicationServerKey`:
+   * un Uint8Array, no la cadena base64url en la que viaja.
+   */
+  const vapidABytes = (base64url) => {
+    const base = String(base64url).replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(base + '='.repeat((4 - (base.length % 4)) % 4));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+
+  /** Estado actual, para poder pintar el interruptor sin adivinar. */
+  const estadoPush = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      return { disponible: false, permiso: 'no-soportado', activo: false, suscripcion: null };
+    }
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sus = reg ? await reg.pushManager.getSubscription() : null;
+    return {
+      disponible: true,
+      permiso: Notification.permission,       // 'default' | 'granted' | 'denied'
+      activo: !!sus,
+      suscripcion: sus
+    };
+  };
+
+  /**
+   * Activa las notificaciones en ESTE aparato.
+   *
+   * Debe llamarse desde un gesto del usuario: los navegadores ignoran —o
+   * bloquean para siempre— una petición de permiso que llega sola al cargar
+   * la página.
+   *
+   * @returns {{ok: boolean, motivo?: string}} `ok:false` con el motivo en
+   *   lenguaje llano, para poder decírselo al fisio sin tecnicismos.
+   */
+  const activarPush = async (clavePublica) => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      return { ok: false, motivo: 'Este navegador no admite notificaciones. En iPhone hay que añadir CLIDANFI a la pantalla de inicio primero.' };
+    }
+    if (!clavePublica) {
+      return { ok: false, motivo: 'Falta la clave VAPID del sitio. Defínela en las variables de Cloudflare Pages y vuelve a publicar.' };
+    }
+
+    const permiso = await Notification.requestPermission();
+    if (permiso !== 'granted') {
+      return {
+        ok: false,
+        motivo: permiso === 'denied'
+          // Un «denegado» no se puede volver a preguntar por código: el
+          // navegador recuerda la decisión y hay que deshacerla a mano.
+          ? 'Bloqueaste las notificaciones para este sitio. Habilítalas desde el candado de la barra de direcciones.'
+          : 'No se concedió el permiso de notificaciones.'
+      };
+    }
+
+    const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+
+    // Si ya había una suscripción con OTRA clave VAPID, hay que deshacerla:
+    // el navegador la conservaría y el Worker firmaría con una clave que no
+    // corresponde, así que los envíos se rechazarían en silencio.
+    const previa = await reg.pushManager.getSubscription();
+    if (previa) await previa.unsubscribe().catch(() => {});
+
+    const sus = await reg.pushManager.subscribe({
+      // Obligatorio en Chrome: promete que cada push mostrará algo visible.
+      userVisibleOnly: true,
+      applicationServerKey: vapidABytes(clavePublica)
+    });
+
+    await API.registrarPush(sus, { agente: navigator.userAgent });
+    return { ok: true, suscripcion: sus };
+  };
+
+  /** Apaga las notificaciones en este aparato (no toca los demás). */
+  const desactivarPush = async () => {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sus = reg ? await reg.pushManager.getSubscription() : null;
+    if (!sus) return { ok: true };
+
+    const endpoint = sus.endpoint;
+    await sus.unsubscribe().catch(() => {});
+    // La baja en la base va después: si se borrara primero y el unsubscribe
+    // fallara, el aparato seguiría recibiendo avisos que ya nadie registra.
+    await API.bajaPush(endpoint).catch(() => {});
+    return { ok: true };
+  };
+
   /** Tamaño de archivo legible: 940 KB, 2.4 MB. */
   const fmtBytes = (n) => {
     const b = Number(n) || 0;
@@ -444,6 +543,7 @@
   global.UI = {
     escapeHtml, normalize, initials, uid, ticketCode,
     telWhatsApp, waLink, fmtBytes,
+    estadoPush, activarPush, desactivarPush,
     toDate, startOfDay, startOfWeek, addDays, isoDay, sameDay, toLocalInput,
     fmtTime, fmtDate, fmtDateLong, fmtDateTime, relDay, fmtMoney, fmtMoneyShort,
     icon, ICONS, placeholderImage, readImageCompressed,

@@ -1,0 +1,56 @@
+#===============================================================================
+# CLIDANFI · Worker de avisos
+#
+# Se despliega APARTE del sitio: Cloudflare Pages sirve dist/ y este Worker
+# corre en segundo plano. No comparten proceso ni despliegue, y es lo correcto
+# —el sitio se publica varias veces al día y el Worker casi nunca.
+#
+#   cd worker
+#   npm install
+#   npx wrangler login
+#   npx wrangler deploy
+#
+# SECRETOS (nunca en este archivo: va a git)
+#   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   npx wrangler secret put VAPID_PRIVATE_KEY
+#   npx wrangler secret put WORKER_SECRET
+#
+# La SERVICE_ROLE key se salta RLS. Es la única forma de leer la agenda
+# cuando no hay ninguna sesión abierta, y por eso vive aquí y JAMÁS en el
+# navegador: quien la tenga puede leer y escribir la base entera.
+#===============================================================================
+
+name               = "clidanfi-avisos"
+main               = "src/index.js"
+compatibility_date = "2026-01-15"
+
+#--- Cron Triggers -------------------------------------------------------------
+# Cloudflare dispara en UTC. El horario de la clínica se resuelve dentro del
+# Worker con Intl, así que aquí no hay ninguna hora local escrita.
+#
+#   */5 * * * *   aviso de 40 minutos antes. Cada 5 min para que ninguna cita
+#                 se quede sin avisar; los repetidos los corta la clave
+#                 primaria de `avisos_enviados`.
+#   0 * * * *     resumen del día siguiente. Se declara cada hora y el propio
+#                 Worker comprueba si en la clínica son las 18:00. Fijar aquí
+#                 una hora UTC obligaría a corregirla en cada cambio de
+#                 horario de verano.
+[triggers]
+crons = ["*/5 * * * *", "0 * * * *"]
+
+#--- Variables (públicas) ------------------------------------------------------
+[vars]
+SUPABASE_URL       = ""                    # https://xxxxxxxx.supabase.co
+VAPID_PUBLIC_KEY   = ""                    # la MISMA que usa el navegador
+VAPID_CONTACTO     = "mailto:contacto@clidanfi.mx"
+TZ_CLINICA         = "America/Mazatlan"    # zona horaria de la clínica
+HORA_RECORDATORIO  = "18"                  # hora local del resumen diario
+MINUTOS_ANTES      = "40"                  # antelación del aviso por sesión
+LADA_PAIS          = "52"
+NOMBRE_CLINICA     = "CLIDANFI"
+
+#--- Observabilidad ------------------------------------------------------------
+# Sin esto, un cron que falla lo hace en silencio: no hay usuario que vea el
+# error porque no hay nadie delante. `wrangler tail` muestra cada ejecución.
+[observability]
+enabled = true

@@ -631,7 +631,12 @@
 
   /* Columnas que pueden faltar si la base no está al día. Se sacrifican antes
      que perder la cita entera (ver `_escrituraTolerante`). */
-  const CITA_COLS_NUEVAS = ['precio', 'cancelada_en', 'motivo_cancelacion'];
+  const CITA_COLS_NUEVAS = ['precio', 'cancelada_en', 'motivo_cancelacion',
+    'cancelada_por', 'cancelada_por_usuario',
+    'falta_en', 'falta_justificada', 'motivo_falta'];
+
+  /** Quién puede figurar como responsable de una cancelación. */
+  const CANCELA_QUIEN = ['Paciente', 'Clínica', 'Otro'];
 
   const _normalizarCita = (data) => {
     const fila = { ...data };
@@ -664,13 +669,81 @@
    * horario queda libre, porque la ocupación de la agenda solo cuenta las
    * citas en estado 'agendada' (ver `conflictosDeAgenda`).
    */
-  const cancelarCita = async (id, { motivo = '', avisado = false } = {}) => {
+  const cancelarCita = async (id, { motivo = '', quien = '', avisado = false } = {}) => {
     const nota = String(motivo || '').trim();
+    // El motivo es obligatorio a propósito. Una cita cancelada sin razón no
+    // se distingue de un hueco cualquiera dentro de tres meses, y es justo
+    // entonces cuando hace falta saber si el paciente abandonó el tratamiento
+    // o si fue la clínica quien movió la agenda.
+    if (!nota) throw new Error('Escribe el motivo de la cancelación: queda en el historial del paciente.');
+
+    const responsable = CANCELA_QUIEN.includes(quien) ? quien : 'Otro';
+
     return actualizarCita(id, {
       estado: 'cancelada',
       cancelada_en: new Date().toISOString(),
-      motivo_cancelacion: avisado && nota ? `${nota} (avisó por WhatsApp)` : nota
+      cancelada_por: responsable,
+      // Quién lo tecleó. Se resuelve del perfil en sesión, no se pide: si se
+      // preguntara, cualquiera podría firmar con otro nombre.
+      cancelada_por_usuario: (_sesion && _sesion.perfil && _sesion.perfil.id) || null,
+      motivo_cancelacion: avisado ? `${nota} (avisó por WhatsApp)` : nota
     });
+  };
+
+  /**
+   * Marca que el paciente NO se presentó.
+   *
+   * No es lo mismo que cancelar y por eso es otra función: en una cancelación
+   * alguien avisó con tiempo y el hueco pudo reasignarse; en una falta el
+   * horario se perdió. Los dos liberan la agenda —la ocupación solo mira las
+   * 'agendada'— pero cuentan distinto en el historial de cumplimiento.
+   *
+   * `justificada` recoge el caso intermedio: avisó tardísimo o hubo una
+   * urgencia. Queda registrado como falta, pero el fisio puede leer el matiz.
+   */
+  const marcarFalta = async (id, { motivo = '', justificada = false } = {}) =>
+    actualizarCita(id, {
+      estado: 'no_asistio',
+      falta_en: new Date().toISOString(),
+      falta_justificada: !!justificada,
+      motivo_falta: String(motivo || '').trim()
+    });
+
+  /** Deshace una falta o una cancelación y devuelve la cita a la agenda. */
+  const reactivarCita = async (id) =>
+    actualizarCita(id, {
+      estado: 'agendada',
+      cancelada_en: null, cancelada_por: '', cancelada_por_usuario: null, motivo_cancelacion: '',
+      falta_en: null, falta_justificada: false, motivo_falta: ''
+    });
+
+  /**
+   * Historial de asistencia de un paciente: asistidas, faltas y canceladas.
+   *
+   * Se calcula sobre las citas ya pasadas. Las canceladas NO penalizan el
+   * cumplimiento: avisar es exactamente lo que la clínica quiere que hagan, y
+   * contarlo como falta desincentivaría el aviso.
+   */
+  const cumplimientoDePaciente = async (pacienteId) => {
+    const rows = ok(await sb.from('citas').select('id, inicia_en, estado, motivo_falta, falta_justificada, motivo_cancelacion, cancelada_por')
+      .eq('paciente_id', pacienteId)
+      .lte('inicia_en', new Date().toISOString())
+      .order('inicia_en', { ascending: false }));
+
+    const faltas     = rows.filter((c) => c.estado === 'no_asistio');
+    const canceladas = rows.filter((c) => c.estado === 'cancelada');
+    const asistidas  = rows.filter((c) => c.estado === 'completada');
+    const base       = asistidas.length + faltas.length;
+
+    return {
+      asistidas: asistidas.length,
+      faltas: faltas.length,
+      canceladas: canceladas.length,
+      cumplimiento: base ? Math.round((asistidas.length / base) * 100) : null,
+      ultima_falta: faltas.length ? faltas[0].inicia_en : null,
+      detalle_faltas: faltas.slice(0, 10),
+      detalle_canceladas: canceladas.slice(0, 10)
+    };
   };
 
   /** Devuelve una cita concreta con el nombre de su paciente ya resuelto. */
@@ -805,6 +878,68 @@
     }
     return ok(await sb.from('valoraciones')
       .insert({ paciente_id: pacienteId, secciones_activas, datos }).select().single());
+  };
+
+  /* --- Opciones personalizadas ------------------------------------------
+     El catálogo de `Store.SECCIONES_VALORACION` cubre lo habitual, pero
+     ninguna lista cerrada aguanta la consulta real. Lo que el fisio añade se
+     guarda aparte y se CONCATENA al pintar, nunca sustituye al catálogo: así
+     una actualización del código no borra lo añadido, y lo añadido tampoco
+     esconde una opción nueva que llegue con el catálogo.
+
+     Se devuelven agrupadas por `seccion.campo`, que es la ruta con la que el
+     renderizador identifica cada lista.
+     ---------------------------------------------------------------------- */
+  const opcionesValoracion = async () => {
+    const r = await opcional(
+      sb.from('valoracion_opciones').select('*').order('creado_en', { ascending: true }),
+      { data: [], error: null },
+      { objeto: 'valoracion_opciones', tolerarPermiso: true });
+
+    const mapa = {};
+    for (const o of r.data || []) {
+      const ruta = `${o.seccion}.${o.campo}`;
+      (mapa[ruta] || (mapa[ruta] = [])).push({ id: o.id, valor: o.valor });
+    }
+    return mapa;
+  };
+
+  /**
+   * Añade una opción a una lista de la valoración.
+   * Devuelve `{ya: true}` si esa opción ya existía —en el catálogo base o
+   * añadida antes—, para poder avisar sin tratarlo como un error.
+   */
+  const agregarOpcionValoracion = async (seccion, campo, valor) => {
+    const texto = String(valor || '').trim();
+    if (!texto) throw new Error('Escribe el texto de la opción.');
+    if (texto.length > 80) throw new Error('La opción es demasiado larga (máximo 80 caracteres).');
+
+    // Contra el catálogo base: sin esto se podría añadir un duplicado exacto
+    // de algo que ya está en la lista, y aparecería dos veces.
+    const base = Store.opcionesDeCampo ? Store.opcionesDeCampo(seccion, campo) : [];
+    if (base.some((o) => String(o).toLowerCase() === texto.toLowerCase())) return { ya: true, valor: texto };
+
+    const { data, error } = await sb.from('valoracion_opciones')
+      .insert({ seccion, campo, valor: texto }).select().single();
+
+    if (error) {
+      if (_esFalta(error)) {
+        _marcarFalta('valoracion_opciones');
+        throw new Error('Tu base no tiene todavía la tabla `valoracion_opciones`. Ejecuta supabase/schema.sql para poder añadir opciones.');
+      }
+      // 23505 = unique_violation: ya estaba añadida.
+      if (error.code === '23505') return { ya: true, valor: texto };
+      if (_esPermiso(error)) throw _errPermiso('valoracion_opciones');
+      throw new Error(error.message);
+    }
+    _marcarPresente('valoracion_opciones');
+    return { ya: false, id: data.id, valor: texto };
+  };
+
+  /** Retira una opción añadida. El catálogo base no se puede tocar desde aquí. */
+  const eliminarOpcionValoracion = async (id) => {
+    ok(await sb.from('valoracion_opciones').delete().eq('id', id));
+    return true;
   };
 
   /* ======================================================================
@@ -946,6 +1081,133 @@
   };
 
   /* ======================================================================
+     CATÁLOGO DE EJERCICIOS  ·  editable, con foto propia
+
+     El catálogo de `Store.CATALOGO_EJERCICIOS` es el punto de partida, no el
+     techo: cada clínica trabaja con su material y sus variantes. Aquí el fisio
+     da de alta los suyos, corrige los que vienen y les pone una foto real —que
+     vale bastante más que una miniatura genérica cuando el paciente intenta
+     recordar el ejercicio en casa.
+
+     La foto va al bucket `ejercicios`, que es PÚBLICO a propósito: no es dato
+     clínico, y el paciente la abre desde su rutina sin firmar nada. Se guarda
+     también su `image_ruta` porque al reemplazarla hay que retirar la anterior,
+     y de una URL pública no se deduce con seguridad qué objeto borrar.
+     ====================================================================== */
+  /** Catálogo completo: lo que hay en la base, con el de `store.js` de respaldo. */
+  const listarEjercicios = async ({ incluirInactivos = false } = {}) => {
+    let q = sb.from('ejercicios').select('*').order('categoria', { ascending: true }).order('nombre', { ascending: true });
+    if (!incluirInactivos) q = q.eq('activo', true);
+    const rows = ok(await q);
+    // Si la base todavía no se ha sembrado, al menos se ve el catálogo local.
+    return rows.length ? rows : Store.CATALOGO_EJERCICIOS.map((e) => ({ ...e, propio: false, activo: true }));
+  };
+
+  /**
+   * Sube la foto de un ejercicio y devuelve `{ruta, url}`.
+   * A diferencia del expediente, aquí SÍ se comprime: es material didáctico y
+   * una foto de 8 MB del móvil tarda en abrirse justo cuando el paciente la
+   * necesita, en mitad de su rutina.
+   */
+  const _subirFotoEjercicio = async (dataUrl, ejercicioId) => {
+    const blob = _dataUrlABlob(dataUrl);
+    const ruta = `${ejercicioId}/${uid('ej')}.jpg`;
+    ok(await sb.storage.from('ejercicios').upload(ruta, blob, { contentType: 'image/jpeg', upsert: false }));
+    const { data } = sb.storage.from('ejercicios').getPublicUrl(ruta);
+    return { ruta, url: data.publicUrl };
+  };
+
+  /**
+   * Alta o edición de un ejercicio.
+   *
+   * `foto` es un dataURL ya comprimido por `UI.readImageCompressed`, o null
+   * para dejar la que hubiera. `foto === ''` significa «quítala».
+   *
+   * El id es `text`, no uuid, porque los del catálogo base son legibles
+   * (`ex_01`) y las rutinas ya existentes los referencian. Los nuevos se
+   * generan con prefijo propio para no chocar nunca con un `ex_NN` que llegue
+   * en una actualización del catálogo.
+   */
+  const guardarEjercicio = async ({ id = null, nombre, categoria, descripcion = '', cue = '',
+                                    sets = 3, reps = 10, hold = 0, activo = true, foto = null }) => {
+    const titulo = String(nombre || '').trim();
+    if (!titulo) throw new Error('El ejercicio necesita un nombre.');
+    if (!String(categoria || '').trim()) throw new Error('Elige una categoría para el ejercicio.');
+
+    const esNuevo = !id;
+    const ejercicioId = id || `ej_${uid('x')}`;
+
+    const fila = {
+      id: ejercicioId,
+      nombre: titulo.slice(0, 120),
+      categoria: String(categoria).trim(),
+      descripcion: String(descripcion || '').trim(),
+      cue: String(cue || '').trim(),
+      sets: Math.max(0, Number(sets) || 0),
+      reps: Math.max(0, Number(reps) || 0),
+      hold: Math.max(0, Number(hold) || 0),
+      activo: !!activo
+    };
+    if (esNuevo) fila.propio = true;
+
+    // La foto anterior, para retirarla solo si todo lo demás sale bien.
+    const previo = id
+      ? (ok(await sb.from('ejercicios').select('image_ruta').eq('id', id).limit(1))[0] || {})
+      : {};
+
+    let subida = null;
+    if (foto && String(foto).startsWith('data:')) {
+      subida = await _subirFotoEjercicio(foto, ejercicioId);
+      fila.image_url = subida.url;
+      fila.image_ruta = subida.ruta;
+    } else if (foto === '') {
+      fila.image_url = '';
+      fila.image_ruta = '';
+    }
+
+    try {
+      const guardado = _escrituraTolerante(
+        (f) => sb.from('ejercicios').upsert(f, { onConflict: 'id' }).select().single(),
+        fila, ['image_ruta', 'propio', 'creado_en']);
+      const r = await guardado;
+
+      // Solo ahora: si el guardado hubiera fallado, borrar la foto vieja
+      // habría dejado al ejercicio sin imagen y sin forma de recuperarla.
+      if ((subida || foto === '') && previo.image_ruta && previo.image_ruta !== fila.image_ruta) {
+        await sb.storage.from('ejercicios').remove([previo.image_ruta]).catch(() => {});
+      }
+      return r;
+    } catch (e) {
+      // Al revés que antes: la foto recién subida se queda huérfana si no se
+      // registró el ejercicio, así que se retira.
+      if (subida) await sb.storage.from('ejercicios').remove([subida.ruta]).catch(() => {});
+      throw e;
+    }
+  };
+
+  /**
+   * Retira un ejercicio del catálogo.
+   *
+   * Por defecto lo DESACTIVA en vez de borrarlo: las rutinas ya entregadas lo
+   * referencian, y un borrado dejaría al paciente con un hueco en su rutina.
+   * El borrado real solo se permite si nadie lo usa.
+   */
+  const eliminarEjercicio = async (id, { forzar = false } = {}) => {
+    const { count } = await sb.from('rutina_items')
+      .select('*', { count: 'exact', head: true }).eq('ejercicio_id', id);
+
+    if (count > 0 && !forzar) {
+      ok(await sb.from('ejercicios').update({ activo: false }).eq('id', id));
+      return { borrado: false, desactivado: true, rutinas: count };
+    }
+
+    const fila = ok(await sb.from('ejercicios').select('image_ruta').eq('id', id).limit(1))[0];
+    if (fila && fila.image_ruta) await sb.storage.from('ejercicios').remove([fila.image_ruta]).catch(() => {});
+    ok(await sb.from('ejercicios').delete().eq('id', id));
+    return { borrado: true, desactivado: false, rutinas: count || 0 };
+  };
+
+  /* ======================================================================
      RUTINAS
      ====================================================================== */
   const SELECT_RUTINA = '*, rutina_items(*, ejercicios(*))';
@@ -1019,10 +1281,19 @@
      SORTEOS
      ====================================================================== */
   const _decorarSorteo = async (s) => {
-    const [{ count: totalBoletos }, boletos] = await Promise.all([
-      sb.from('boletos').select('*', { count: 'exact', head: true }).eq('sorteo_id', s.id),
-      sb.from('boletos').select('paciente_id').eq('sorteo_id', s.id).then(ok)
-    ]);
+    // `is('anulado_en', null)` = solo los boletos que de verdad participan: un
+    // boleto anulado ni cuenta ni compite. Si la base todavía no tiene esa
+    // columna se reintenta sin el filtro, que es el comportamiento de antes.
+    let res = await sb.from('boletos').select('paciente_id', { count: 'exact' })
+      .eq('sorteo_id', s.id).is('anulado_en', null);
+
+    if (res.error && _esColumna(res.error)) {
+      _marcarFalta('boletos.anulado_en');
+      res = await sb.from('boletos').select('paciente_id', { count: 'exact' })
+        .eq('sorteo_id', s.id);
+    }
+    const totalBoletos = res.count || 0;
+    const boletos = ok(res);
     const ganador = s.ganador_paciente_id
       ? ok(await sb.from('pacientes').select('nombre').eq('id', s.ganador_paciente_id).single())
       : null;
@@ -1066,16 +1337,92 @@
     return { creados: r?.[0]?.creados ?? 0, eliminados: r?.[0]?.eliminados ?? 0 };
   };
 
+  /**
+   * Participantes con el detalle de CADA boleto, no solo el conteo.
+   *
+   * El detalle hace falta porque una participación se puede anular suelta: la
+   * interfaz necesita poder señalar cuál. Los anulados se devuelven también,
+   * marcados, para poder deshacerlo.
+   */
   const participantesDeSorteo = async (sorteoId) => {
-    const rows = ok(await sb.from('boletos').select('codigo, paciente_id, pacientes(nombre)').eq('sorteo_id', sorteoId));
+    const rows = await _boletosDe(sorteoId);
+
     const map = new Map();
     rows.forEach((b) => {
-      if (!map.has(b.paciente_id)) map.set(b.paciente_id, { paciente_id: b.paciente_id, nombre: b.pacientes?.nombre || '—', boletos: [] });
-      map.get(b.paciente_id).boletos.push(b.codigo);
+      if (!map.has(b.paciente_id)) {
+        map.set(b.paciente_id, { paciente_id: b.paciente_id, nombre: (b.pacientes && b.pacientes.nombre) || '—', boletos: [] });
+      }
+      map.get(b.paciente_id).boletos.push({
+        id: b.id,
+        codigo: b.codigo,
+        creado_en: b.creado_en,
+        anulado: !!b.anulado_en,
+        motivo: b.motivo_anulacion || ''
+      });
     });
-    return [...map.values()].map((r) => ({ ...r, total: r.boletos.length }))
+
+    return [...map.values()].map((r) => {
+      const vivos = r.boletos.filter((b) => !b.anulado);
+      return { ...r, total: vivos.length, total_anulados: r.boletos.length - vivos.length };
+    })
+      // Quien se queda con cero boletos vivos baja del todo, pero sigue
+      // visible: es la única forma de devolverle la participación.
       .sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre));
   };
+
+  /* --- Anulación de UNA participación -----------------------------------
+     Distinto de excluir a la persona: excluir la saca de la rifa entera y de
+     las siguientes emisiones; esto retira un boleto concreto y deja los demás
+     en pie —el caso de la asistencia que se registró por error, o del boleto
+     que se emitió dos veces por un doble clic.
+
+     No se borra la fila: el boleto nace de una asistencia que sigue ahí, así
+     que `sincronizar_boletos` lo repondría en el siguiente guardado. Se marca,
+     y el `on conflict do nothing` de la sincronización respeta la marca.
+     ---------------------------------------------------------------------- */
+
+  /**
+   * Boletos de un sorteo. Si la base todavía no tiene las columnas de
+   * anulación, reintenta sin ellas: se pierde la marca de anulado —no hay
+   * ninguna— pero la lista de participantes se sigue viendo, que es lo que no
+   * puede faltar.
+   */
+  const _boletosDe = async (sorteoId) => {
+    const COLS_ANULACION = 'anulado_en, motivo_anulacion, ';
+    const base = 'id, codigo, creado_en, paciente_id, pacientes(nombre)';
+
+    const pedir = (cols) => sb.from('boletos').select(cols)
+      .eq('sorteo_id', sorteoId).order('creado_en', { ascending: true });
+
+    const res = await pedir(COLS_ANULACION + base);
+    if (res.error && _esColumna(res.error)) {
+      _marcarFalta('boletos.anulado_en');
+      return ok(await pedir(base));
+    }
+    return ok(res);
+  };
+
+  const anularBoleto = async (boletoId, { motivo = '' } = {}) => {
+    const patch = {
+      anulado_en: new Date().toISOString(),
+      anulado_por: (_sesion && _sesion.perfil && _sesion.perfil.id) || null,
+      motivo_anulacion: String(motivo || '').trim()
+    };
+
+    const res = await sb.from('boletos').update(patch).eq('id', boletoId).select().single();
+
+    if (res.error && _esColumna(res.error)) {
+      _marcarFalta('boletos.anulado_en');
+      throw new Error('Tu base no tiene todavía la anulación por participación. Ejecuta supabase/schema.sql para habilitarla.');
+    }
+    return ok(res);
+  };
+
+  /** Devuelve una participación anulada. */
+  const restaurarBoleto = async (boletoId) =>
+    ok(await sb.from('boletos')
+      .update({ anulado_en: null, anulado_por: null, motivo_anulacion: '' })
+      .eq('id', boletoId).select().single());
 
   /* --- Participantes excluidos ------------------------------------------
      Sacar a alguien de la rifa NO puede ser solo borrarle los boletos: se
@@ -1288,6 +1635,95 @@
   };
 
   /* ======================================================================
+     NOTIFICACIONES PUSH  ·  el lado del navegador
+
+     Aquí solo se guarda la suscripción; quien manda los avisos es el Worker
+     de Cloudflare (`worker/`), porque a las 18:00 o 40 minutos antes de una
+     sesión no hay ninguna garantía de que la aplicación esté abierta —que es
+     justo el motivo de que esto no pueda vivir en el frontend.
+
+     Una suscripción es por navegador y aparato: el mismo fisio en el móvil y
+     en el portátil son dos filas, y las dos deben recibir.
+     ====================================================================== */
+
+  /** ¿El navegador puede recibir push? (Safari < 16.4 y http:// no pueden). */
+  const puedePush = () =>
+    typeof window !== 'undefined' &&
+    'serviceWorker' in (window.navigator || {}) &&
+    'PushManager' in window &&
+    'Notification' in window;
+
+  /**
+   * Registra —o refresca— la suscripción de ESTE navegador.
+   *
+   * Se hace upsert por `endpoint` y no insert porque el navegador puede
+   * devolver el mismo endpoint tras un permiso reconcedido; sin el upsert
+   * saldría un error de unicidad en un momento en que el usuario acaba de
+   * decir que sí y esperaría que funcionara.
+   */
+  const registrarPush = async (suscripcion, { agente = '' } = {}) => {
+    const s = typeof suscripcion.toJSON === 'function' ? suscripcion.toJSON() : suscripcion;
+    if (!s || !s.endpoint || !s.keys || !s.keys.p256dh || !s.keys.auth) {
+      throw new Error('La suscripción del navegador llegó incompleta.');
+    }
+    if (!_sesion) await auth.sesion();
+    if (!_sesion) throw new Error('Inicia sesión antes de activar las notificaciones.');
+
+    const { data, error } = await sb.from('push_suscripciones').upsert({
+      usuario_id: _sesion.user.id,
+      endpoint: s.endpoint,
+      p256dh: s.keys.p256dh,
+      auth: s.keys.auth,
+      agente: String(agente || '').slice(0, 200),
+      fallos: 0
+    }, { onConflict: 'endpoint' }).select().single();
+
+    if (error) {
+      if (_esFalta(error)) {
+        _marcarFalta('push_suscripciones');
+        throw new Error('Tu base no tiene todavía la tabla `push_suscripciones`. Ejecuta supabase/schema.sql.');
+      }
+      if (_esPermiso(error)) throw _errPermiso('push_suscripciones');
+      throw new Error(error.message);
+    }
+    _marcarPresente('push_suscripciones');
+    return data;
+  };
+
+  /** Da de baja este navegador. Por endpoint: no toca los demás aparatos. */
+  const bajaPush = async (endpoint) => {
+    const { error } = await sb.from('push_suscripciones').delete().eq('endpoint', endpoint);
+    if (error && !_esFalta(error)) throw new Error(error.message);
+    return true;
+  };
+
+  /** Aparatos suscritos del usuario en sesión, para poder revisarlos. */
+  const suscripcionesPush = async () => {
+    const r = await opcional(
+      sb.from('push_suscripciones').select('id, endpoint, agente, creado_en, ultimo_ok')
+        .order('creado_en', { ascending: false }),
+      { data: [], error: null },
+      { objeto: 'push_suscripciones', tolerarPermiso: true });
+    return r.data || [];
+  };
+
+  /**
+   * Citas del día siguiente con el teléfono a mano.
+   *
+   * La usa el Worker para armar el recordatorio de las 18:00, y también la
+   * interfaz para enseñar exactamente lo que se va a mandar antes de que
+   * llegue la hora.
+   */
+  const citasDeManana = async () => {
+    const manana = isoDay(addDays(new Date(), 1));
+    return _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
+      .eq('estado', 'agendada')
+      .gte('inicia_en', `${manana}T00:00:00`)
+      .lte('inicia_en', `${manana}T23:59:59`)
+      .order('inicia_en', { ascending: true })));
+  };
+
+  /* ======================================================================
      EXPORT · sobrescribe window.API manteniendo la misma firma
      ====================================================================== */
   /* ======================================================================
@@ -1302,9 +1738,11 @@
 
   const SOLO_FISIO = [
     'listarPacientes', 'crearPaciente', 'crearPacienteExpres', 'actualizarPaciente', 'eliminarPaciente',
-    'citasDeHoy', 'proximasCitas', 'obtenerCita', 'crearCita', 'actualizarCita',
-    'cancelarCita', 'eliminarCita', 'conflictosDeAgenda',
+    'citasDeHoy', 'proximasCitas', 'citasDeManana', 'obtenerCita', 'crearCita', 'actualizarCita',
+    'cancelarCita', 'marcarFalta', 'reactivarCita', 'eliminarCita', 'conflictosDeAgenda',
     'registrarAsistencia', 'eliminarAsistencia',
+    'listarEjercicios', 'guardarEjercicio', 'eliminarEjercicio',
+    'agregarOpcionValoracion', 'eliminarOpcionValoracion',
     'registrarPago', 'actualizarPago', 'eliminarPago', 'ingresosSemana',
     'guardarValoracion', 'crearNota', 'agregarAdjunto', 'eliminarNota',
     'subirArchivo', 'eliminarArchivo', 'enlaceDeArchivo',
@@ -1313,6 +1751,7 @@
     'listarSorteos', 'obtenerSorteo', 'guardarSorteo', 'eliminarSorteo',
     'sincronizarBoletos', 'participantesDeSorteo', 'realizarSorteo', 'publicarGanador',
     'excluidosDeSorteo', 'excluirDeSorteo', 'readmitirEnSorteo',
+    'anularBoleto', 'restaurarBoleto',
     'listarSolicitudes', 'actualizarSolicitud', 'convertirSolicitud',
     'resumenDashboard',
     'setConfig', 'subirLogo', 'quitarLogo'
@@ -1324,7 +1763,8 @@
     obtenerPaciente: 0, citasDePaciente: 0, proximaCitaDePaciente: 0,
     asistenciasDePaciente: 0, pagosDePaciente: 0,
     valoracionDePaciente: 0, notasDePaciente: 0, archivosDePaciente: 0,
-    rutinasDePaciente: 0, rutinaActiva: 0, misBoletos: 0
+    rutinasDePaciente: 0, rutinaActiva: 0, misBoletos: 0,
+    cumplimientoDePaciente: 0
   };
 
   // Abiertas a cualquier sesión (la RLS ya las acota por sí sola):
@@ -1368,11 +1808,14 @@
     setConfig, subirLogo, quitarLogo,
     listarPacientes, obtenerPaciente, crearPaciente, crearPacienteExpres,
     actualizarPaciente, eliminarPaciente,
-    citasDeHoy, proximasCitas, citasDePaciente, proximaCitaDePaciente, obtenerCita,
-    crearCita, actualizarCita, cancelarCita, eliminarCita, conflictosDeAgenda,
+    citasDeHoy, proximasCitas, citasDeManana, citasDePaciente, proximaCitaDePaciente, obtenerCita,
+    crearCita, actualizarCita, cancelarCita, marcarFalta, reactivarCita,
+    eliminarCita, conflictosDeAgenda, cumplimientoDePaciente,
     registrarAsistencia, asistenciasDePaciente, eliminarAsistencia,
     registrarPago, actualizarPago, eliminarPago, ingresosSemana, pagosDePaciente,
     valoracionDePaciente, guardarValoracion,
+    opcionesValoracion, agregarOpcionValoracion, eliminarOpcionValoracion,
+    listarEjercicios, guardarEjercicio, eliminarEjercicio,
     notasDePaciente, crearNota, agregarAdjunto, eliminarNota,
     archivosDePaciente, subirArchivo, eliminarArchivo, enlaceDeArchivo,
     rutinasDePaciente, rutinaActiva, guardarRutina, activarRutina, eliminarRutina,
@@ -1380,6 +1823,8 @@
     listarSorteos, obtenerSorteo, guardarSorteo, eliminarSorteo,
     sincronizarBoletos, participantesDeSorteo, realizarSorteo, publicarGanador, misBoletos,
     excluidosDeSorteo, excluirDeSorteo, readmitirEnSorteo,
+    anularBoleto, restaurarBoleto,
+    registrarPush, bajaPush, suscripcionesPush,
     sorteosVitrina, crearSolicitudCita, misSolicitudes,
     listarSolicitudes, actualizarSolicitud, convertirSolicitud,
     resumenDashboard
@@ -1393,7 +1838,9 @@
     getConfig,
     miPaciente,
     faltaEnEsquema,
-    verificarEsquema
+    verificarEsquema,
+    // Consulta de capacidad del navegador: no toca la base ni necesita sesión.
+    puedePush
   });
 
   console.info('[CLIDANFI] API conectada a Supabase.');
