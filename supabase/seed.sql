@@ -60,6 +60,14 @@ begin
   --     El trigger handle_new_user ya creó ambos como 'paciente';
   --     aquí promovemos al fisioterapeuta.
   ---------------------------------------------------------------------------
+  -- El trigger trg_bloquear_rol impide que nadie se auto-promueva, y para
+  -- decidirlo pregunta por es_fisio(), que mira el rol de auth.uid(). En una
+  -- sesión de SQL auth.uid() es NULL, así que da false SIEMPRE: sin esta pausa
+  -- el primer fisioterapeuta de una base recién creada no se puede nombrar
+  -- nunca —ni desde aquí ni desde el SQL Editor—. Se reactiva en cuanto termina
+  -- la promoción, y si algo falla el rollback de este bloque lo reactiva igual.
+  execute 'alter table perfiles disable trigger trg_bloquear_rol';
+
   insert into perfiles (id, rol, nombre)
   values (v_fisio_uid, 'fisio', 'Fisio. Daniela Figueroa')
   on conflict (id) do update set rol = 'fisio', nombre = excluded.nombre;
@@ -67,6 +75,8 @@ begin
   insert into perfiles (id, rol, nombre)
   values (v_pac_uid, 'paciente', 'Paciente de Prueba')
   on conflict (id) do update set rol = 'paciente', nombre = excluded.nombre;
+
+  execute 'alter table perfiles enable trigger trg_bloquear_rol';
 
   ---------------------------------------------------------------------------
   -- 2 · EL PACIENTE, ligado a su cuenta
