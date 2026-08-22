@@ -40,8 +40,8 @@ crons = ["*/5 * * * *", "0 * * * *"]
 
 #--- Variables (públicas) ------------------------------------------------------
 [vars]
-SUPABASE_URL       = ""                    # https://xxxxxxxx.supabase.co
-VAPID_PUBLIC_KEY   = ""                    # la MISMA que usa el navegador
+SUPABASE_URL       = "https://lzvhptjfvzccfwvwgexa.supabase.co"
+VAPID_PUBLIC_KEY   = "BLNC68OvLSqYOVbzquA_V-Ie5-ANLRPHb_WkQXrhTLsuKu1rPnf-bQuS4ytDKQGa63zK5kPT6Mboq0MyLWzGueY"  # la MISMA que usa el navegador
 VAPID_CONTACTO     = "mailto:contacto@clidanfi.mx"
 TZ_CLINICA         = "America/Mazatlan"    # zona horaria de la clínica
 HORA_RECORDATORIO  = "18"                  # hora local del resumen diario

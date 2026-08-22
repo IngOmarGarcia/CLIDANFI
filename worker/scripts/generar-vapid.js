@@ -15,7 +15,7 @@
 
    Uso:  node scripts/generar-vapid.js
    ========================================================================== */
-const { webcrypto } = require('crypto');
+import { webcrypto } from 'node:crypto';
 
 const b64url = (buf) => Buffer.from(buf).toString('base64')
   .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
