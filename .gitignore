@@ -15,3 +15,6 @@ Thumbs.db
 .netlify/
 .env
 .env.*
+# …salvo la plantilla, que es justo lo que necesita quien clone el repo.
+# Sin esta excepción, `.env.*` se la traga y no hay de dónde partir.
+!.env.example

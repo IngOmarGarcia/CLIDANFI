@@ -61,7 +61,10 @@ const copiar = (rel) => {
   }
 };
 
-['index.html', 'css', 'js', 'assets', '_headers', 'robots.txt'].forEach(copiar);
+// `sw.js` va en la RAÍZ y no dentro de js/: un service worker solo controla
+// su propia carpeta hacia abajo, así que desde /js/ no podría gobernar el
+// sitio entero ni atender las notificaciones.
+['index.html', 'sw.js', 'css', 'js', 'assets', '_headers', '_redirects', 'robots.txt'].forEach(copiar);
 
 /* --- 4 · verificaciones de salida ----------------------------------------- */
 const problemas = [];
@@ -71,6 +74,13 @@ if (html.includes('cdn.tailwindcss.com')) problemas.push('index.html sigue carga
 if (!fs.existsSync(path.join(DIST, 'css', 'tailwind.css'))) problemas.push('falta dist/css/tailwind.css');
 if (!fs.existsSync(path.join(DIST, 'js', 'env.js'))) problemas.push('falta dist/js/env.js');
 if (fs.existsSync(path.join(DIST, 'css', 'input.css'))) problemas.push('input.css no debería publicarse');
+// Sin el service worker en la raíz, `navigator.serviceWorker.register('/sw.js')`
+// da 404 y las notificaciones no se pueden activar: el interruptor fallaría
+// sin que el build hubiera avisado de nada.
+if (!fs.existsSync(path.join(DIST, 'sw.js'))) problemas.push('falta dist/sw.js (service worker de notificaciones)');
+// Sin `_headers` el sitio se publica en Cloudflare sin CSP ni HSTS, y no hay
+// nada visible que lo delate: la aplicación funciona igual de bien sin ellas.
+if (!fs.existsSync(path.join(DIST, '_headers'))) problemas.push('falta dist/_headers (cabeceras de seguridad de Cloudflare)');
 
 /* Ningún archivo publicado puede llevar una llave con privilegios.
    Se buscan JWT reales y se decodifica su payload: mencionar la cadena

@@ -10,7 +10,9 @@
     "check": "node scripts/check-schema.js",
     "test:esquema": "node scripts/test-esquema.js",
     "test:subidas": "node scripts/test-subidas.js",
-    "test": "npm run check && npm run test:esquema && npm run test:subidas",
+    "test:funciones": "node scripts/test-funciones.js",
+    "test:worker": "node --test \"worker/test/*.test.js\"",
+    "test": "npm run check && npm run test:esquema && npm run test:subidas && npm run test:funciones && npm run test:worker",
     "css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --minify",
     "css:watch": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --watch",
     "dev": "npm run env && npm run vendor && npm run css:watch",
@@ -21,6 +23,7 @@
     "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
+    "dotenv": "^17.4.2",
     "tailwindcss": "^3.4.17"
   },
   "engines": {

@@ -254,10 +254,32 @@
   /* ======================================================================
      EXPORT
      ====================================================================== */
+  /**
+   * Opciones del catálogo BASE de un campo de la valoración.
+   *
+   * Es el punto único donde se resuelve la ruta `seccion.campo`, y lo usan
+   * tanto el renderizador —para concatenar las opciones que añadió el fisio—
+   * como la API, para no dejar añadir un duplicado de algo que ya venía.
+   *
+   * Devuelve [] si la sección o el campo no existen, o si ese campo no es de
+   * los que tienen lista (un `textarea` no la tiene).
+   */
+  const opcionesDeCampo = (seccion, campo) => {
+    const sec = SECCIONES_VALORACION.find((s) => s.key === seccion);
+    if (!sec) return [];
+    const c = sec.campos.find((f) => f.key === campo);
+    return (c && Array.isArray(c.options)) ? c.options : [];
+  };
+
+  /** ¿Este campo admite opciones nuevas? Solo las listas, no los textos. */
+  const CAMPOS_AMPLIABLES = ['select', 'checks', 'tests'];
+
   global.Store = {
     CATALOGO_EJERCICIOS,
     CATEGORIAS_EJERCICIO,
     SECCIONES_VALORACION,
+    CAMPOS_AMPLIABLES,
+    opcionesDeCampo,
     ejercicio: (id) => CATALOGO_EJERCICIOS.find((e) => e.id === id) || null
   };
 })(window);

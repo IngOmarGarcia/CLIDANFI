@@ -1,14 +1,22 @@
 #!/usr/bin/env node
 /* ==========================================================================
    Genera js/env.js a partir de las variables de entorno.
-   Se ejecuta en el build de Netlify y también en local (`npm run env`).
+   Se ejecuta en el build de Cloudflare Pages y también en local
+   (`npm run env`, y de paso en `npm run build` y `npm run dev`).
 
    Variables que lee (acepta el prefijo VITE_/PUBLIC_ por comodidad):
-     SUPABASE_URL        · SUPABASE_ANON_KEY
+     SUPABASE_URL · SUPABASE_ANON_KEY · VAPID_PUBLIC_KEY
 
-   Si no están definidas, escribe valores vacíos: la app arranca igual en
-   MODO DEMOSTRACIÓN (datos locales) y avisa en la pantalla de acceso.
+   En local salen de un archivo `.env` en la raíz (ver `.env.example`); en
+   Cloudflare Pages, de Settings → Environment variables. Ni `.env` ni el
+   `js/env.js` generado se suben a git.
+
+   Si faltan, escribe valores vacíos: la aplicación arranca y muestra la
+   pantalla de configuración diciendo qué falta, en vez de romperse con un
+   error que no explica nada.
    ========================================================================== */
+require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 
@@ -25,6 +33,13 @@ const leer = (...nombres) => {
 
 const url = leer('SUPABASE_URL', 'VITE_SUPABASE_URL', 'PUBLIC_SUPABASE_URL');
 const key = leer('SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY', 'PUBLIC_SUPABASE_ANON_KEY');
+
+// Clave pública VAPID de las notificaciones push. Es PÚBLICA por definición
+// —el navegador la necesita para suscribirse— y no da acceso a nada: la que
+// firma los envíos es la privada, que vive solo como secreto del Worker.
+// Si falta, la aplicación funciona igual y el interruptor de notificaciones
+// se muestra apagado con el motivo.
+const vapid = leer('VAPID_PUBLIC_KEY', 'VITE_VAPID_PUBLIC_KEY', 'PUBLIC_VAPID_PUBLIC_KEY');
 
 /* --- Validaciones que evitan desplegar con credenciales equivocadas ------ */
 const errores = [];
@@ -44,6 +59,15 @@ if (key) {
   } catch { /* si no se puede decodificar, la validación anterior ya avisó */ }
 }
 
+// La pública VAPID es un punto P-256 sin comprimir: 65 bytes que en base64url
+// son 87 caracteres y empiezan por 'B' (el 0x04 inicial). Vale la pena
+// comprobarlo aquí: una clave mal copiada no falla al desplegar, falla meses
+// después cuando una notificación no llega y nadie sabe por qué.
+if (vapid && !/^B[A-Za-z0-9_-]{85,86}$/.test(vapid)) {
+  errores.push(`VAPID_PUBLIC_KEY no parece una clave pública P-256 (${vapid.length} caracteres, se esperan 87). ` +
+               'Genérala con `npm run vapid` dentro de worker/.');
+}
+
 if (errores.length) {
   console.error('\n[CLIDANFI] Error de configuración:\n' + errores.map((e) => '  · ' + e).join('\n') + '\n');
   process.exit(1);
@@ -52,7 +76,8 @@ if (errores.length) {
 const contenido = `/* ARCHIVO GENERADO por scripts/generate-env.js — no editar a mano. */
 window.CLIDANFI_ENV = {
   SUPABASE_URL: ${JSON.stringify(url)},
-  SUPABASE_ANON_KEY: ${JSON.stringify(key)}
+  SUPABASE_ANON_KEY: ${JSON.stringify(key)},
+  VAPID_PUBLIC_KEY: ${JSON.stringify(vapid)}
 };
 `;
 
