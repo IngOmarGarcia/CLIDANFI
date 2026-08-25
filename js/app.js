@@ -239,13 +239,30 @@
       <p class="min-w-0 flex-1 truncate text-[14px] font-extrabold text-ink-900">${E(resultado.titulo || '')}</p>`;
   }
 
-  function pintarNav() {
-    const nav = document.getElementById('bottom-nav');
-    const actual = '#' + estado.ruta.path;
+  /**
+   * HTML de la lista de secciones. Una sola fuente para las dos
+   * presentaciones: barra inferior en móvil, barra lateral en escritorio.
+   * Es pura a propósito —no toca el DOM— para poder probarla sin navegador.
+   */
+  function navHTML(items, actual, variante) {
+    if (variante === 'lateral') {
+      return `
+        <nav class="flex flex-col gap-1 p-3" aria-label="Navegación principal">
+          ${items.map((it) => {
+            const on = actual === it.href;
+            return `
+              <a href="${it.href}" ${on ? 'aria-current="page"' : ''}
+                class="nav-side flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-bold transition">
+                <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg">${icon(it.icono, 'h-5 w-5')}</span>
+                <span class="truncate">${E(it.label)}</span>
+              </a>`;
+          }).join('')}
+        </nav>`;
+    }
 
-    nav.innerHTML = `
+    return `
       <div class="nav-safe flex items-stretch justify-around px-2 pt-2">
-        ${NAV[rol()].map((it) => {
+        ${items.map((it) => {
           const on = actual === it.href;
           return `
             <a href="${it.href}" class="nav-item flex flex-1 flex-col items-center gap-1 py-1" ${on ? 'aria-current="page"' : ''}>
@@ -254,6 +271,14 @@
             </a>`;
         }).join('')}
       </div>`;
+  }
+
+  function pintarNav() {
+    const actual = '#' + estado.ruta.path;
+    const items = NAV[rol()];
+    document.getElementById('bottom-nav').innerHTML = navHTML(items, actual, 'inferior');
+    const lado = document.getElementById('side-nav');
+    if (lado) lado.innerHTML = navHTML(items, actual, 'lateral');
   }
 
   /* ======================================================================
@@ -767,4 +792,8 @@
     get rol() { return rol(); },
     get sesion() { return estado.sesion; }
   };
+
+  // Se expone solo para que scripts/test-navegacion.js pueda probarlo sin
+  // navegador. La aplicación usa navHTML() directamente, no por aquí.
+  global.AppNav = { navHTML };
 })(window);
