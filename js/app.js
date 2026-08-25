@@ -140,7 +140,12 @@
 
       const conNav = !ruta.def.sinNav;
       mostrarChrome(true, conNav);
-      root.innerHTML = resultado.html;
+      // Un solo envoltorio para las 16 raíces de vista: el ancho de
+      // escritorio se resuelve aquí y no repitiendo clases en cada vista.
+      // Debe ser un div liso —sin `overflow`— o en móvil convertiría a
+      // #view-root en contenedor de scroll y las cabeceras `sticky` de las
+      // vistas dejarían de pegarse.
+      root.innerHTML = `<div class="view-container">${resultado.html}</div>`;
       irArriba(root);
 
       pintarBarraContexto(resultado);
