@@ -828,13 +828,25 @@ Sin tocar el enrutador: las rutas siguen siendo `#/t/pacientes` y `#/t/paciente/
 - Modify: `js/views-therapist.js:624` (`pacientes()`) y `:683` (`paciente()`)
 
 **Interfaces:**
-- Produces: `panelLista(list, seleccionadoId)` → `string`, el panel izquierdo reutilizado por las dos vistas.
+- Produces:
+  - `filaPanel(p, seleccionadoId)` → `string`, una entrada de la lista lateral.
+  - `panelLista(list, seleccionadoId)` → `string`, el panel izquierdo reutilizado por las dos vistas.
 
 - [ ] **Step 1: Extraer el panel de lista**
 
-Sacar de `pacientes()` el buscador y la lista a una función que las dos vistas puedan usar:
+Sacar de `pacientes()` el buscador y la lista a dos funciones que las dos
+vistas puedan usar. `filaPanel` va aparte **a propósito**: el repintado del
+buscador (Step 4) necesita exactamente el mismo marcado, y tenerlo en dos
+sitios garantiza que se separen en cuanto alguien toque uno.
 
 ```js
+  /** Una entrada del panel lateral. Única fuente del marcado de la fila. */
+  const filaPanel = (p, seleccionadoId = '') => `
+    <a href="#/t/paciente/${E(p.id)}"
+      class="block rounded-xl px-3 py-2.5 text-[13px] font-bold ${p.id === seleccionadoId ? 'bg-brand-100 text-brand-700' : 'text-ink-700 hover:bg-ink-100'}">
+      ${E(p.nombre)}
+    </a>`;
+
   /**
    * Panel izquierdo de la vista de dos columnas. Es el mismo buscador y la
    * misma lista que se ven a pantalla completa en móvil; lo único que cambia
@@ -849,11 +861,7 @@ Sacar de `pacientes()` el buscador y la lista a una función que las dos vistas 
             class="field !py-2.5 !rounded-xl" />
         </div>
         <div id="lista-pacientes-panel" class="min-h-0 flex-1 overflow-y-auto p-2">
-          ${list.map((p) => `
-            <a href="#/t/paciente/${E(p.id)}"
-              class="block rounded-xl px-3 py-2.5 text-[13px] font-bold ${p.id === seleccionadoId ? 'bg-brand-100 text-brand-700' : 'text-ink-700 hover:bg-ink-100'}">
-              ${E(p.nombre)}
-            </a>`).join('')}
+          ${list.map((p) => filaPanel(p, seleccionadoId)).join('')}
         </div>
       </div>`;
   }
@@ -911,11 +919,9 @@ En el `onMount` de las dos vistas, añadir:
             const cont = root.querySelector('#lista-pacientes-panel');
             if (!cont) return;
             const sel = location.hash.split('/').pop();
-            cont.innerHTML = nuevos.map((p) => `
-              <a href="#/t/paciente/${E(p.id)}"
-                class="block rounded-xl px-3 py-2.5 text-[13px] font-bold ${p.id === sel ? 'bg-brand-100 text-brand-700' : 'text-ink-700 hover:bg-ink-100'}">
-                ${E(p.nombre)}
-              </a>`).join('');
+            // Misma función que el primer pintado: si el marcado de la fila
+            // cambia, cambia en los dos sitios a la vez.
+            cont.innerHTML = nuevos.map((p) => filaPanel(p, sel)).join('');
           }, 180);
         });
       }
