@@ -440,10 +440,10 @@
     // NO existe en la base. No se rompe nada, pero hay que decirlo con claridad.
 
     const html = `
-      <div class="space-y-4 px-4 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pt-4 anim-fade-up md:grid md:grid-cols-2 md:items-start md:gap-4 md:space-y-0 xl:grid-cols-3">
 
         ${falta ? `
-          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4 md:col-span-2 xl:col-span-3">
             <p class="flex items-center gap-2 text-[13px] font-extrabold text-amber-900">
               ${icon('alert', 'h-4 w-4 shrink-0')} Base de datos desactualizada
             </p>
@@ -458,7 +458,7 @@
 
         ${r.solicitudes_nuevas ? `
           <button data-action="ver-solicitudes"
-            class="flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-3.5 text-left shadow-card active:scale-[.99]">
+            class="flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-3.5 text-left shadow-card active:scale-[.99] md:col-span-2 xl:col-span-3">
             <span class="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-600 text-white">
               ${icon('bell', 'h-5 w-5')}
               <span class="absolute -right-1 -top-1 grid h-5 min-w-[1.25rem] place-items-center rounded-full bg-ink-900 px-1 text-[10px] font-extrabold text-white">${r.solicitudes_nuevas}</span>
@@ -496,7 +496,7 @@
           <p class="mt-2 text-center text-[10.5px] font-medium text-ink-400">
             ${E(fmtDate(ingresos.inicio))} – ${E(fmtDate(ingresos.fin))} · Ticket prom. ${E(fmtMoney(r.ticket_promedio))}
           </p>
-        `)}
+        `, 'md:col-span-2 xl:col-span-3')}
 
         <!-- KPIs -->
         <div class="flex gap-2.5">
