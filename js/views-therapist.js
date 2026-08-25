@@ -637,12 +637,12 @@
               class="absolute right-3 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full bg-ink-200 text-ink-600">
               ${icon('x', 'h-3.5 w-3.5')}</button>` : ''}
           </div>
-          <p class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
+          <p id="meta-pacientes" class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
             ${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${list.length} paciente${list.length === 1 ? '' : 's'}
           </p>
         </div>
 
-        <div class="space-y-2 px-4 pb-4">
+        <div id="lista-pacientes" class="space-y-2 px-4 pb-4">
           ${list.length
             ? list.map(pacienteRow).join('')
             : emptyState('users', _busqueda ? 'Sin resultados' : 'Aún no hay pacientes',
@@ -661,13 +661,15 @@
         clearTimeout(t);
         t = setTimeout(async () => {
           const nuevos = await API.listarPacientes({ q: _busqueda });
-          const cont = root.querySelector('.space-y-2.px-4.pb-4');
+          // Por id, no por clases: las clases cambian con el layout
+          // responsivo y un selector de clases se rompería en silencio.
+          const cont = root.querySelector('#lista-pacientes');
           if (cont) {
             cont.innerHTML = nuevos.length
               ? nuevos.map(pacienteRow).join('')
               : emptyState('users', 'Sin resultados', `No encontramos pacientes que coincidan con "${_busqueda}".`);
           }
-          const meta = root.querySelector('p.mt-2');
+          const meta = root.querySelector('#meta-pacientes');
           if (meta) meta.innerHTML = `${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${nuevos.length} paciente${nuevos.length === 1 ? '' : 's'}`;
         }, 180);
       });
