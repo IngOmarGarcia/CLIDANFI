@@ -366,6 +366,25 @@
       </button>`;
   }
 
+  /* Misma cita que citaRow, en fila de tabla para escritorio. El
+     `data-action="cita-menu"` es idéntico a propósito: el delegador de
+     eventos no distingue entre tarjeta y fila, así que no hay que duplicar
+     ninguna lógica de apertura. */
+  function citaFila(c) {
+    const [tone, label] = ESTADO_CITA[c.estado] || ESTADO_CITA.agendada;
+    return `
+      <tr class="border-b border-ink-100 hover:bg-ink-50">
+        <td class="py-2.5 pr-3 font-bold tabular-nums">${E(fmtTime(c.inicia_en))}</td>
+        <td class="py-2.5 pr-3">${E(c.paciente_nombre)}</td>
+        <td class="py-2.5 pr-3 text-ink-500">${E(c.motivo)} · ${c.duracion_min} min</td>
+        <td class="py-2.5 pr-3">${badge(label, tone)}</td>
+        <td class="py-2.5 text-right">
+          <button data-action="cita-menu" data-id="${c.id}"
+            class="rounded-lg px-2.5 py-1.5 text-[12px] font-bold text-brand-700 hover:bg-brand-50">Abrir</button>
+        </td>
+      </tr>`;
+  }
+
   /** Fila de la lista de pacientes. */
   function pacienteRow(p) {
     const restantes = p.paquete_restantes;
@@ -607,7 +626,23 @@
                   <span class="text-[11px] font-semibold text-ink-400">${E(fmtDate(dia))}</span>
                   <span class="ml-auto rounded-full bg-ink-100 px-2 py-0.5 text-[10.5px] font-bold text-ink-600">${list.length} cita${list.length === 1 ? '' : 's'}</span>
                 </div>
-                <div class="space-y-2">${list.map((c) => citaRow(c)).join('')}</div>
+                <div class="space-y-2 lg:hidden">${list.map((c) => citaRow(c)).join('')}</div>
+                <div class="hidden lg:block">
+                  <table class="w-full border-collapse text-[13px]">
+                    <thead>
+                      <tr class="border-b border-ink-200 text-left text-[11px] uppercase tracking-wide text-ink-500">
+                        <th class="py-2 pr-3 font-bold">Hora</th>
+                        <th class="py-2 pr-3 font-bold">Paciente</th>
+                        <th class="py-2 pr-3 font-bold">Servicio</th>
+                        <th class="py-2 pr-3 font-bold">Estado</th>
+                        <th class="py-2 font-bold"><span class="sr-only">Acciones</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${list.map(citaFila).join('')}
+                    </tbody>
+                  </table>
+                </div>
               </div>`).join('')}
       </div>
 
