@@ -390,11 +390,11 @@
     wrap.className = 'fixed inset-0 z-50';
     wrap.innerHTML = `
       <div data-sheet-backdrop class="anim-fade absolute inset-0 bg-ink-900/45 backdrop-blur-[2px]"></div>
-      <div class="absolute inset-x-0 bottom-0 mx-auto w-full max-w-[480px]">
+      <div class="absolute inset-x-0 bottom-0 mx-auto w-full max-w-[480px] lg:inset-y-0 lg:flex lg:max-w-2xl lg:items-center">
         <section role="dialog" aria-modal="true" aria-label="${escapeHtml(title || 'Panel')}"
-          class="anim-sheet flex ${heights[size] || heights.auto} flex-col overflow-hidden rounded-t-[1.75rem] bg-white shadow-lift">
+          class="anim-sheet flex ${heights[size] || heights.auto} flex-col overflow-hidden rounded-t-[1.75rem] bg-white shadow-lift lg:max-h-[85dvh] lg:w-full lg:rounded-[1.5rem]">
           <header class="shrink-0 border-b border-ink-100 px-4 pb-3 pt-2">
-            <div class="mx-auto mb-2.5 h-1.5 w-10 rounded-full bg-ink-200"></div>
+            <div class="mx-auto mb-2.5 h-1.5 w-10 rounded-full bg-ink-200 lg:hidden"></div>
             <div class="flex items-start gap-3">
               <div class="min-w-0 flex-1">
                 <h2 class="truncate text-[16px] font-extrabold tracking-tight text-ink-900">${escapeHtml(title || '')}</h2>

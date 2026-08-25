@@ -26,7 +26,7 @@
    * la app para que quede alineado al marco también en escritorio.
    */
   const fab = (accion, aria, color = 'bg-brand-600') => `
-    <div class="pointer-events-none fixed bottom-24 left-1/2 z-20 flex w-full max-w-[480px] -translate-x-1/2 justify-end px-4">
+    <div class="pointer-events-none fixed bottom-24 left-1/2 z-20 flex w-full max-w-[480px] lg:max-w-[1600px] lg:pr-8 -translate-x-1/2 justify-end px-4">
       <button data-action="${accion}" aria-label="${E(aria)}"
         class="pointer-events-auto grid h-14 w-14 place-items-center rounded-full ${color} text-white shadow-lift active:scale-95">
         ${icon('plus', 'h-6 w-6', 2.4)}
@@ -67,7 +67,7 @@
    * dibuja: la barra ocupa el borde inferior ella sola y nada la tapa.
    */
   const barraGuardar = (accion, datos, texto) => `
-    <div class="fixed bottom-0 left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,.25)] backdrop-blur nav-safe">
+    <div class="fixed bottom-0 left-1/2 z-40 w-full max-w-[480px] lg:max-w-[1600px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,.25)] backdrop-blur nav-safe">
       <p id="indicador-pendiente" class="mb-1.5 hidden items-center justify-center gap-1.5 text-[11.5px] font-bold text-amber-700">
         ${icon('alert', 'h-3.5 w-3.5')} Tienes cambios sin guardar
       </p>
