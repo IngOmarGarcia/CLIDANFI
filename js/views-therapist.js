@@ -807,7 +807,7 @@
           <div class="scroll-x no-scrollbar pb-1">${tabs}</div>
         </div>
 
-        <div class="mt-3 space-y-4 px-4 pb-6">${avisoPendiente}${contenido}</div>
+        <div class="mt-3 space-y-4 px-4 pb-6 xl:grid xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start xl:gap-5 xl:space-y-0">${avisoPendiente}${contenido}</div>
       </div>`;
 
     /* La pestaña de historial trae un selector de archivos, y un `<input
@@ -844,7 +844,7 @@
           <span>${usadas} de ${total} usadas</span>
           <span>${p.paquete_vence ? `Vence ${E(fmtDate(p.paquete_vence))}` : 'Sin vigencia'}</span>
         </div>
-      `) : card(`
+      `, 'xl:sticky xl:top-4') : card(`
         <!-- Sin paquete no se pinta una barra al 0 %: parecería un paquete
              agotado, que es lo contrario de «paga por sesión». -->
         <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
@@ -853,7 +853,7 @@
           class="mt-2 rounded-xl bg-ink-100 px-3 py-1.5 text-[12px] font-bold text-ink-600 active:scale-95">
           Contratar un paquete
         </button>
-      `)}
+      `, 'xl:sticky xl:top-4')}
 
       ${(cumpl.faltas > 0 || cumpl.canceladas > 0) ? card(`
         <div class="flex items-center justify-between">
@@ -1326,8 +1326,11 @@
 
     const secciones = Store.SECCIONES_VALORACION.map((sec) => {
       const on = sec.always || activas.has(sec.key);
+      // Goniometría y fuerza traen una tabla (.tbl) ancha: su <section>, que
+      // es la que es hijo directo de la rejilla, ocupa las dos columnas.
+      const tieneTabla = sec.campos.some((c) => c.type === 'rom' || c.type === 'mmt');
       return `
-        <section data-sec="${sec.key}" class="overflow-hidden rounded-2xl border ${on ? 'border-brand-200' : 'border-ink-200/70'} bg-white shadow-card transition">
+        <section data-sec="${sec.key}" class="overflow-hidden rounded-2xl border ${on ? 'border-brand-200' : 'border-ink-200/70'} bg-white shadow-card transition ${tieneTabla ? 'lg:col-span-2' : ''}">
           <header class="flex items-center gap-3 px-4 py-3">
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl ${on ? 'bg-brand-100 text-brand-700' : 'bg-ink-100 text-ink-400'}">
               ${icon(sec.icono, 'h-4 w-4')}
@@ -1353,7 +1356,7 @@
     const html = `
       <!-- pb-48: deja sitio a la barra de guardar, que crece si aparecen el
            aviso «sin guardar» y el resultado del guardado -->
-      <div class="space-y-3.5 px-4 pb-48 pt-4 anim-fade-up">
+      <div class="space-y-3.5 px-4 pb-48 pt-4 anim-fade-up lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">Valoración inicial</p>
           <p class="text-[15px] font-extrabold text-brand-900">${E(p.nombre)}</p>
@@ -1599,7 +1602,7 @@
       </button>`;
 
     const html = `
-      <div class="space-y-4 px-4 pb-48 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pb-48 pt-4 anim-fade-up sm:grid sm:grid-cols-2 sm:items-start sm:gap-3 sm:space-y-0 lg:grid-cols-3 xl:grid-cols-4">
 
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">${base ? 'Editar rutina' : 'Nueva rutina'}</p>
@@ -1832,7 +1835,7 @@
     };
 
     const html = `
-      <div class="space-y-4 px-4 pb-4 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pb-4 pt-4 anim-fade-up lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
         <div class="rounded-2xl bg-gradient-to-br from-violet-600 to-violet-700 px-4 py-4 text-white shadow-card">
           <div class="flex items-center gap-2">${icon('sparkles', 'h-4 w-4')}
             <p class="text-[11px] font-extrabold uppercase tracking-wider">Programa de fidelidad</p></div>
