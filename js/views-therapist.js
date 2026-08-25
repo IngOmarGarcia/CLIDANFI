@@ -737,13 +737,24 @@
       tab === 'valoracion' ? await tabValoracion(p) :
       tab === 'historial'  ? await tabHistorial(p)  :
       tab === 'rutinas'    ? await tabRutinas(p)    :
-                             await tabResumen(p, { usadas, total, pct });
+                             await tabResumen(p);
+
+    /* Corrección de rejilla (xl): la tarjeta de resumen (paquete de sesiones)
+       solo existe en la pestaña «Resumen» —es la única con algo que fijar en
+       la columna angosta—. En las otras tres pestañas no hay tarjeta que
+       extraer, así que esta variable queda vacía y el envoltorio de abajo
+       ocupa las dos columnas él solo (`xl:col-span-2`), tal como se veía
+       antes de este ajuste. Así la rejilla nunca reparte los hermanos de una
+       pestaña fila a fila entre las dos columnas. */
+    const tarjetaResumen = tab === 'resumen' ? tarjetaResumenPaquete(p, { usadas, total, pct }) : '';
 
     /* Alta exprés sin historia clínica: el aviso va en TODAS las pestañas, no
        solo en el resumen, porque el hueco que deja se nota justo cuando se
-       abre la valoración o se busca un diagnóstico que nadie capturó. */
+       abre la valoración o se busca un diagnóstico que nadie capturó.
+       `xl:col-span-2`: si no, al ser el primer hijo de la rejilla le robaría
+       el sitio a la tarjeta de resumen en la columna angosta. */
     const avisoPendiente = p.expediente_pendiente ? `
-      <div class="rounded-2xl border border-amber-300 bg-amber-50 p-3.5">
+      <div class="rounded-2xl border border-amber-300 bg-amber-50 p-3.5 xl:col-span-2">
         <p class="flex items-center gap-2 text-[13px] font-extrabold text-amber-900">
           ${icon('alert', 'h-4 w-4 shrink-0')} Historial clínico pendiente
         </p>
@@ -807,7 +818,7 @@
           <div class="scroll-x no-scrollbar pb-1">${tabs}</div>
         </div>
 
-        <div class="mt-3 space-y-4 px-4 pb-6 xl:grid xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start xl:gap-5 xl:space-y-0">${avisoPendiente}${contenido}</div>
+        <div class="mt-3 space-y-4 px-4 pb-6 xl:grid xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start xl:gap-5 xl:space-y-0">${avisoPendiente}${tarjetaResumen}<div class="min-w-0${tab === 'resumen' ? '' : ' xl:col-span-2'}">${contenido}</div></div>
       </div>`;
 
     /* La pestaña de historial trae un selector de archivos, y un `<input
@@ -822,16 +833,17 @@
   }
 
   /* --------------------------------------------------- Tab · Resumen ----- */
-  async function tabResumen(p, { usadas, total, pct }) {
-    const [asistencias, pagos, citas, cumpl] = await Promise.all([
-      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
-      API.cumplimientoDePaciente(p.id)
-    ]);
-    const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
-    const prox = p.proxima_cita;
 
-    return `
-      ${total > 0 ? card(`
+  /**
+   * Tarjeta de «Paquete de sesiones». Se extrajo de `tabResumen()` porque,
+   * en la rejilla de la ficha (≥1280px), es la única pieza que se fija en
+   * la columna angosta (`xl:sticky xl:top-4`); el resto de la pestaña
+   * Resumen queda en el envoltorio de la columna ancha. Solo se llama
+   * cuando `tab === 'resumen'`, así que en móvil y en las otras pestañas
+   * no cambia nada.
+   */
+  const tarjetaResumenPaquete = (p, { usadas, total, pct }) =>
+    total > 0 ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
           ${badge(p.paquete_restantes === 0 ? 'Agotado' : `${p.paquete_restantes} restantes`, p.paquete_restantes === 0 ? 'rose' : p.paquete_restantes <= 2 ? 'amber' : 'green')}
@@ -853,8 +865,17 @@
           class="mt-2 rounded-xl bg-ink-100 px-3 py-1.5 text-[12px] font-bold text-ink-600 active:scale-95">
           Contratar un paquete
         </button>
-      `, 'xl:sticky xl:top-4')}
+      `, 'xl:sticky xl:top-4');
 
+  async function tabResumen(p) {
+    const [asistencias, pagos, citas, cumpl] = await Promise.all([
+      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
+      API.cumplimientoDePaciente(p.id)
+    ]);
+    const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
+    const prox = p.proxima_cita;
+
+    return `
       ${(cumpl.faltas > 0 || cumpl.canceladas > 0) ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Control de asistencia</p>
