@@ -208,6 +208,9 @@
    * pero ocultan el menú inferior para no tapar la barra de guardar.
    */
   function mostrarChrome(visible, conNav = true) {
+    // Estado del shell. `con-sesion` es de lo que cuelga todo el layout de
+    // escritorio: sin ella, la pantalla de acceso conserva el marco oscuro.
+    document.body.classList.toggle('con-sesion', visible);
     document.getElementById('app-header').classList.toggle('hidden', !visible);
     document.getElementById('bottom-nav').classList.toggle('hidden', !visible || !conNav);
     // El hueco de pb-28 solo hace falta si el menú está a la vista; en las

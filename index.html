@@ -38,6 +38,11 @@
 
   <div class="app-shell">
 
+    <!-- Barra lateral · solo visible con sesión y en pantallas grandes.
+         Vive FUERA de .app-frame a propósito: dentro quedaría atrapada por
+         el `transform` del marco y no podría ocupar el alto de la ventana. -->
+    <aside id="side-nav" class="side-nav" aria-label="Secciones"></aside>
+
     <!-- El marco: pantalla completa en móvil, dispositivo centrado en PC.
          Sin `overflow-hidden` aquí a propósito: en móvil convertiría el marco
          en contenedor de scroll y la cabecera sticky dejaría de funcionar.
