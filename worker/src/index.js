@@ -41,7 +41,7 @@ import {
    buena parte del mundo. Se resuelve con `Intl`, que conoce las reglas de
    cada zona, en vez de restar horas a mano.
    -------------------------------------------------------------------------- */
-const zonaDe = (env) => env.TZ_CLINICA || 'America/Mazatlan';
+const zonaDe = (env) => env.TZ_CLINICA || 'America/Mexico_City';
 
 /** Hora (0-23) que marca el reloj de la clínica en este instante. */
 function horaLocal(fecha, zona) {
