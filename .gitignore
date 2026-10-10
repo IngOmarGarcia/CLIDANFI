@@ -1,5 +1,7 @@
 node_modules/
 dist/
+output/
+tmp/
 
 # Generados por el build
 js/env.js

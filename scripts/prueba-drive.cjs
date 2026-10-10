@@ -40,6 +40,15 @@ const ok = r => { if (r.error) throw new Error(r.error.message); return r.data; 
     }
   }
   if (!paciente) throw new Error('No existe el paciente ficticio; ejecutar con --crear');
+  if (process.argv.includes('--nueva-version')) {
+    const fila = ok(await sb.from('valoraciones').select('id,datos').eq('paciente_id', paciente.id)
+      .order('creado_en', { ascending: false }).limit(1).single());
+    const ahora = new Date().toISOString();
+    ok(await sb.from('valoraciones').update({
+      datos: { ...fila.datos, general: { ...fila.datos.general,
+        motivo: `${marca}. Verificación de nueva edición PDF: ${ahora}` } }, actualizado_en: ahora
+    }).eq('id', fila.id).eq('paciente_id', paciente.id));
+  }
   const versiones = ok(await sb.from('valoraciones_versiones')
     .select('id,creado_en,drive_archivo_id,intentos,ultimo_error,reintentar_en')
     .eq('paciente_id', paciente.id).order('creado_en', { ascending: false }));

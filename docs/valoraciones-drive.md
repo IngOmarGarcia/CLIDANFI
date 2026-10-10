@@ -47,9 +47,15 @@ logs de borrado y respaldos anteriores. No ejecutar seed.sql para recuperar dato
 
 ## Resultado y verificación
 
-Cada versión se guarda como un JSON completo con nombre:
-`Nombre paciente - fecha UTC de creación de valoración - UUID de versión.json`.
-Incluye nombre, identificadores, fecha del guardado y todos los datos originales.
+Cada versión se guarda como un PDF legible con nombre:
+`Nombre paciente - DD-MM-AAAA HH-mm-ss - Valoración inicial.pdf`.
+El nombre usa la fecha de cada guardado en Ciudad de México; la hora distingue
+ediciones. El UUID se conserva en metadatos privados, sin aparecer en el nombre.
+Los respaldos anteriores adoptan el nuevo nombre automáticamente.
+Incluye nombre, identificadores, fecha del guardado, secciones y datos clínicos.
+Las fechas dentro del documento se muestran en hora de Ciudad de México.
+Los JSON anteriores se convierten automáticamente en PDF conservando el ID y
+el enlace del archivo en Drive. No requiere otra migración de Supabase.
 Cada edición crea una copia adicional; no sobrescribe respaldos anteriores.
 La cuenta autorizada se verifica antes de procesar. Los archivos no se comparten
 públicamente. Un identificador privado permite recuperar una subida anterior
