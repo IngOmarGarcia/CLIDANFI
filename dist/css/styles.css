@@ -89,9 +89,10 @@ input, select, textarea { font-size: 16px; }
 .app-shell { position: relative; z-index: 1; }
 
 @media (min-width: 900px) {
-  .app-watermark { display: block; }
+  /* --- SIN SESIÓN · el marco de dispositivo, tal cual estaba ------------- */
+  body:not(.con-sesion) .app-watermark { display: block; }
 
-  .app-shell {
+  body:not(.con-sesion) .app-shell {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -104,7 +105,7 @@ input, select, textarea { font-size: 16px; }
      contenedor de referencia de sus hijos `position: fixed` (nav inferior,
      botón flotante, paneles y avisos), que así quedan dentro del marco en vez
      de pegarse a los bordes de la ventana. */
-  .app-frame {
+  body:not(.con-sesion) .app-frame {
     transform: translateZ(0);
     position: relative;
     height: min(var(--frame-max-h), calc(100dvh - 56px));
@@ -119,7 +120,7 @@ input, select, textarea { font-size: 16px; }
   }
 
   /* Brillo superior sutil, como el bisel de un dispositivo */
-  .app-frame::before {
+  body:not(.con-sesion) .app-frame::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -130,14 +131,14 @@ input, select, textarea { font-size: 16px; }
   }
 
   /* El contenido pasa a desplazarse dentro del marco */
-  #view-root {
+  body:not(.con-sesion) #view-root {
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--ink-300, #d0c8b9) transparent;
   }
-  #view-root::-webkit-scrollbar { width: 8px; }
-  #view-root::-webkit-scrollbar-thumb {
+  body:not(.con-sesion) #view-root::-webkit-scrollbar { width: 8px; }
+  body:not(.con-sesion) #view-root::-webkit-scrollbar-thumb {
     background: var(--ink-200);
     border-radius: 99px;
     border: 2px solid transparent;
@@ -145,14 +146,81 @@ input, select, textarea { font-size: 16px; }
   }
 
   /* En escritorio no hay notch: recupera el espacio de las safe-areas */
-  .app-frame .nav-safe { padding-bottom: .5rem; }
-  #app-header > div:first-child { padding-top: .75rem; }
+  body:not(.con-sesion) .app-frame .nav-safe { padding-bottom: .5rem; }
+  body:not(.con-sesion) #app-header > div:first-child { padding-top: .75rem; }
+
+  /* --- CON SESIÓN · aplicación a ancho completo -------------------------- */
+  /* El fondo oscuro y la marca de agua son del acceso; aquí estorban. */
+  body.con-sesion { background: var(--cream-100); }
+  body.con-sesion.app-bg { background: var(--cream-100); }
+  body.con-sesion .app-bg::after { display: none; }
+  body.con-sesion .app-watermark { display: none; }
+
+  /* Sin `transform` ni `overflow` en el marco: los descendientes
+     `position: fixed` vuelven a anclarse a la ventana, que es lo que
+     queremos en escritorio. Ver el aviso del plan sobre este punto. */
+  body.con-sesion .app-frame {
+    max-width: none;
+    transform: none;
+    height: auto;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  body.con-sesion .app-frame::before { display: none; }
 }
 
 /* Pantallas muy bajas: que el marco no se coma la interfaz */
 @media (min-width: 900px) and (max-height: 720px) {
-  .app-shell { padding: 12px; }
-  .app-frame { height: calc(100dvh - 24px); border-radius: 22px; }
+  body:not(.con-sesion) .app-shell { padding: 12px; }
+  body:not(.con-sesion) .app-frame { height: calc(100dvh - 24px); border-radius: 22px; }
+}
+
+/* --- ≥1024 px · barra lateral ------------------------------------------- */
+.side-nav { display: none; }
+
+@media (min-width: 1024px) {
+  body.con-sesion .app-shell {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    min-height: 100dvh;
+  }
+
+  body.con-sesion .side-nav {
+    display: block;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100dvh;
+    border-right: 1px solid var(--ink-200);
+    background: #fff;
+  }
+
+  /* La barra inferior sobra: sus secciones están ya en el lateral. */
+  body.con-sesion #bottom-nav { display: none !important; }
+  /* …y con ella sobra el hueco que se le reservaba. */
+  body.con-sesion #view-root.pb-28 { padding-bottom: 1.5rem; }
+}
+
+/* Estados de la barra lateral */
+.nav-side { color: var(--ink-500); }
+.nav-side:hover { background: var(--ink-100); color: var(--ink-900); }
+.nav-side[aria-current="page"] { background: var(--brand-100); color: var(--brand-700); }
+
+/* ==========================================================================
+   Contenedor de contenido
+   En móvil es transparente: no aporta ancho ni márgenes, para que las vistas
+   queden exactamente como estaban. A partir de 900 px pone el tope de ancho.
+   ========================================================================== */
+.view-container { width: 100%; }
+
+@media (min-width: 900px) {
+  body.con-sesion .view-container {
+    max-width: 1600px;
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
 }
 
 /* ==========================================================================

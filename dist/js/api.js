@@ -874,10 +874,17 @@
     if (id) {
       return ok(await sb.from('valoraciones')
         .update({ secciones_activas, datos, actualizado_en: new Date().toISOString() })
-        .eq('id', id).select().single());
+        .eq('id', id).eq('paciente_id', pacienteId).select().single());
     }
     return ok(await sb.from('valoraciones')
       .insert({ paciente_id: pacienteId, secciones_activas, datos }).select().single());
+  };
+
+  const historialValoraciones = async (pacienteId) => {
+    const res = await sb.from('valoraciones_versiones').select('*')
+      .eq('paciente_id', pacienteId).order('creado_en', { ascending: false });
+    if (res.error && _esFalta(res.error)) return null;
+    return ok(res);
   };
 
   /* --- Opciones personalizadas ------------------------------------------
@@ -1618,6 +1625,8 @@
                  { objeto: 'solicitudes_cita', tolerarPermiso: true })
       ]);
 
+    // Un contador fallido no significa que la clínica tenga cero registros.
+    [atendidosHoy, atendidosSemana, pacientesActivos, sorteosActivos].forEach(ok);
     return {
       ingresos,
       citas_hoy: citasHoy,
@@ -1737,6 +1746,7 @@
      ====================================================================== */
 
   const SOLO_FISIO = [
+    'historialValoraciones',
     'listarPacientes', 'crearPaciente', 'crearPacienteExpres', 'actualizarPaciente', 'eliminarPaciente',
     'citasDeHoy', 'proximasCitas', 'citasDeManana', 'obtenerCita', 'crearCita', 'actualizarCita',
     'cancelarCita', 'marcarFalta', 'reactivarCita', 'eliminarCita', 'conflictosDeAgenda',
@@ -1813,7 +1823,7 @@
     eliminarCita, conflictosDeAgenda, cumplimientoDePaciente,
     registrarAsistencia, asistenciasDePaciente, eliminarAsistencia,
     registrarPago, actualizarPago, eliminarPago, ingresosSemana, pagosDePaciente,
-    valoracionDePaciente, guardarValoracion,
+    valoracionDePaciente, guardarValoracion, historialValoraciones,
     opcionesValoracion, agregarOpcionValoracion, eliminarOpcionValoracion,
     listarEjercicios, guardarEjercicio, eliminarEjercicio,
     notasDePaciente, crearNota, agregarAdjunto, eliminarNota,

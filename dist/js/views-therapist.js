@@ -26,7 +26,7 @@
    * la app para que quede alineado al marco también en escritorio.
    */
   const fab = (accion, aria, color = 'bg-brand-600') => `
-    <div class="pointer-events-none fixed bottom-24 left-1/2 z-20 flex w-full max-w-[480px] -translate-x-1/2 justify-end px-4">
+    <div class="pointer-events-none fixed bottom-24 left-1/2 z-20 flex w-full max-w-[480px] lg:max-w-[1600px] lg:pr-8 -translate-x-1/2 justify-end px-4">
       <button data-action="${accion}" aria-label="${E(aria)}"
         class="pointer-events-auto grid h-14 w-14 place-items-center rounded-full ${color} text-white shadow-lift active:scale-95">
         ${icon('plus', 'h-6 w-6', 2.4)}
@@ -67,7 +67,7 @@
    * dibuja: la barra ocupa el borde inferior ella sola y nada la tapa.
    */
   const barraGuardar = (accion, datos, texto) => `
-    <div class="fixed bottom-0 left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,.25)] backdrop-blur nav-safe">
+    <div class="fixed bottom-0 left-1/2 z-40 w-full max-w-[480px] lg:max-w-[1600px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,.25)] backdrop-blur nav-safe">
       <p id="indicador-pendiente" class="mb-1.5 hidden items-center justify-center gap-1.5 text-[11.5px] font-bold text-amber-700">
         ${icon('alert', 'h-3.5 w-3.5')} Tienes cambios sin guardar
       </p>
@@ -366,6 +366,25 @@
       </button>`;
   }
 
+  /* Misma cita que citaRow, en fila de tabla para escritorio. El
+     `data-action="cita-menu"` es idéntico a propósito: el delegador de
+     eventos no distingue entre tarjeta y fila, así que no hay que duplicar
+     ninguna lógica de apertura. */
+  function citaFila(c) {
+    const [tone, label] = ESTADO_CITA[c.estado] || ESTADO_CITA.agendada;
+    return `
+      <tr class="border-b border-ink-100 hover:bg-ink-50">
+        <td class="py-2.5 pr-3 font-bold tabular-nums">${E(fmtTime(c.inicia_en))}</td>
+        <td class="py-2.5 pr-3">${E(c.paciente_nombre)}</td>
+        <td class="py-2.5 pr-3 text-ink-500">${E(c.motivo)} · ${c.duracion_min} min</td>
+        <td class="py-2.5 pr-3">${badge(label, tone)}</td>
+        <td class="py-2.5 text-right">
+          <button data-action="cita-menu" data-id="${c.id}"
+            class="rounded-lg px-2.5 py-1.5 text-[12px] font-bold text-brand-700 hover:bg-brand-50">Abrir</button>
+        </td>
+      </tr>`;
+  }
+
   /** Fila de la lista de pacientes. */
   function pacienteRow(p) {
     const restantes = p.paquete_restantes;
@@ -440,10 +459,10 @@
     // NO existe en la base. No se rompe nada, pero hay que decirlo con claridad.
 
     const html = `
-      <div class="space-y-4 px-4 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pt-4 anim-fade-up md:grid md:grid-cols-2 md:items-start md:gap-4 md:space-y-0 xl:grid-cols-3">
 
         ${falta ? `
-          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4 md:col-span-2 xl:col-span-3">
             <p class="flex items-center gap-2 text-[13px] font-extrabold text-amber-900">
               ${icon('alert', 'h-4 w-4 shrink-0')} Base de datos desactualizada
             </p>
@@ -458,7 +477,7 @@
 
         ${r.solicitudes_nuevas ? `
           <button data-action="ver-solicitudes"
-            class="flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-3.5 text-left shadow-card active:scale-[.99]">
+            class="flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-3.5 text-left shadow-card active:scale-[.99] md:col-span-2 xl:col-span-3">
             <span class="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-600 text-white">
               ${icon('bell', 'h-5 w-5')}
               <span class="absolute -right-1 -top-1 grid h-5 min-w-[1.25rem] place-items-center rounded-full bg-ink-900 px-1 text-[10px] font-extrabold text-white">${r.solicitudes_nuevas}</span>
@@ -496,7 +515,7 @@
           <p class="mt-2 text-center text-[10.5px] font-medium text-ink-400">
             ${E(fmtDate(ingresos.inicio))} – ${E(fmtDate(ingresos.fin))} · Ticket prom. ${E(fmtMoney(r.ticket_promedio))}
           </p>
-        `)}
+        `, 'md:col-span-2 xl:col-span-3')}
 
         <!-- KPIs -->
         <div class="flex gap-2.5">
@@ -607,7 +626,23 @@
                   <span class="text-[11px] font-semibold text-ink-400">${E(fmtDate(dia))}</span>
                   <span class="ml-auto rounded-full bg-ink-100 px-2 py-0.5 text-[10.5px] font-bold text-ink-600">${list.length} cita${list.length === 1 ? '' : 's'}</span>
                 </div>
-                <div class="space-y-2">${list.map((c) => citaRow(c)).join('')}</div>
+                <div class="space-y-2 lg:hidden">${list.map((c) => citaRow(c)).join('')}</div>
+                <div class="hidden lg:block">
+                  <table class="w-full border-collapse text-[13px]">
+                    <thead>
+                      <tr class="border-b border-ink-200 text-left text-[11px] uppercase tracking-wide text-ink-500">
+                        <th class="py-2 pr-3 font-bold">Hora</th>
+                        <th class="py-2 pr-3 font-bold">Paciente</th>
+                        <th class="py-2 pr-3 font-bold">Servicio</th>
+                        <th class="py-2 pr-3 font-bold">Estado</th>
+                        <th class="py-2 font-bold"><span class="sr-only">Acciones</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${list.map(citaFila).join('')}
+                    </tbody>
+                  </table>
+                </div>
               </div>`).join('')}
       </div>
 
@@ -637,12 +672,12 @@
               class="absolute right-3 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full bg-ink-200 text-ink-600">
               ${icon('x', 'h-3.5 w-3.5')}</button>` : ''}
           </div>
-          <p class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
+          <p id="meta-pacientes" class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
             ${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${list.length} paciente${list.length === 1 ? '' : 's'}
           </p>
         </div>
 
-        <div class="space-y-2 px-4 pb-4">
+        <div id="lista-pacientes" class="space-y-2 px-4 pb-4">
           ${list.length
             ? list.map(pacienteRow).join('')
             : emptyState('users', _busqueda ? 'Sin resultados' : 'Aún no hay pacientes',
@@ -661,13 +696,15 @@
         clearTimeout(t);
         t = setTimeout(async () => {
           const nuevos = await API.listarPacientes({ q: _busqueda });
-          const cont = root.querySelector('.space-y-2.px-4.pb-4');
+          // Por id, no por clases: las clases cambian con el layout
+          // responsivo y un selector de clases se rompería en silencio.
+          const cont = root.querySelector('#lista-pacientes');
           if (cont) {
             cont.innerHTML = nuevos.length
               ? nuevos.map(pacienteRow).join('')
               : emptyState('users', 'Sin resultados', `No encontramos pacientes que coincidan con "${_busqueda}".`);
           }
-          const meta = root.querySelector('p.mt-2');
+          const meta = root.querySelector('#meta-pacientes');
           if (meta) meta.innerHTML = `${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${nuevos.length} paciente${nuevos.length === 1 ? '' : 's'}`;
         }, 180);
       });
@@ -700,13 +737,24 @@
       tab === 'valoracion' ? await tabValoracion(p) :
       tab === 'historial'  ? await tabHistorial(p)  :
       tab === 'rutinas'    ? await tabRutinas(p)    :
-                             await tabResumen(p, { usadas, total, pct });
+                             await tabResumen(p);
+
+    /* Corrección de rejilla (xl): la tarjeta de resumen (paquete de sesiones)
+       solo existe en la pestaña «Resumen» —es la única con algo que fijar en
+       la columna angosta—. En las otras tres pestañas no hay tarjeta que
+       extraer, así que esta variable queda vacía y el envoltorio de abajo
+       ocupa las dos columnas él solo (`xl:col-span-2`), tal como se veía
+       antes de este ajuste. Así la rejilla nunca reparte los hermanos de una
+       pestaña fila a fila entre las dos columnas. */
+    const tarjetaResumen = tab === 'resumen' ? tarjetaResumenPaquete(p, { usadas, total, pct }) : '';
 
     /* Alta exprés sin historia clínica: el aviso va en TODAS las pestañas, no
        solo en el resumen, porque el hueco que deja se nota justo cuando se
-       abre la valoración o se busca un diagnóstico que nadie capturó. */
+       abre la valoración o se busca un diagnóstico que nadie capturó.
+       `xl:col-span-2`: si no, al ser el primer hijo de la rejilla le robaría
+       el sitio a la tarjeta de resumen en la columna angosta. */
     const avisoPendiente = p.expediente_pendiente ? `
-      <div class="rounded-2xl border border-amber-300 bg-amber-50 p-3.5">
+      <div class="rounded-2xl border border-amber-300 bg-amber-50 p-3.5 xl:col-span-2">
         <p class="flex items-center gap-2 text-[13px] font-extrabold text-amber-900">
           ${icon('alert', 'h-4 w-4 shrink-0')} Historial clínico pendiente
         </p>
@@ -770,7 +818,7 @@
           <div class="scroll-x no-scrollbar pb-1">${tabs}</div>
         </div>
 
-        <div class="mt-3 space-y-4 px-4 pb-6">${avisoPendiente}${contenido}</div>
+        <div class="mt-3 space-y-4 px-4 pb-6 xl:grid xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start xl:gap-5 xl:space-y-0">${avisoPendiente}${tarjetaResumen}<div class="min-w-0${tab === 'resumen' ? '' : ' xl:col-span-2'}">${contenido}</div></div>
       </div>`;
 
     /* La pestaña de historial trae un selector de archivos, y un `<input
@@ -785,16 +833,17 @@
   }
 
   /* --------------------------------------------------- Tab · Resumen ----- */
-  async function tabResumen(p, { usadas, total, pct }) {
-    const [asistencias, pagos, citas, cumpl] = await Promise.all([
-      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
-      API.cumplimientoDePaciente(p.id)
-    ]);
-    const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
-    const prox = p.proxima_cita;
 
-    return `
-      ${total > 0 ? card(`
+  /**
+   * Tarjeta de «Paquete de sesiones». Se extrajo de `tabResumen()` porque,
+   * en la rejilla de la ficha (≥1280px), es la única pieza que se fija en
+   * la columna angosta (`xl:sticky xl:top-4`); el resto de la pestaña
+   * Resumen queda en el envoltorio de la columna ancha. Solo se llama
+   * cuando `tab === 'resumen'`, así que en móvil y en las otras pestañas
+   * no cambia nada.
+   */
+  const tarjetaResumenPaquete = (p, { usadas, total, pct }) =>
+    total > 0 ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
           ${badge(p.paquete_restantes === 0 ? 'Agotado' : `${p.paquete_restantes} restantes`, p.paquete_restantes === 0 ? 'rose' : p.paquete_restantes <= 2 ? 'amber' : 'green')}
@@ -807,7 +856,7 @@
           <span>${usadas} de ${total} usadas</span>
           <span>${p.paquete_vence ? `Vence ${E(fmtDate(p.paquete_vence))}` : 'Sin vigencia'}</span>
         </div>
-      `) : card(`
+      `, 'xl:sticky xl:top-4') : card(`
         <!-- Sin paquete no se pinta una barra al 0 %: parecería un paquete
              agotado, que es lo contrario de «paga por sesión». -->
         <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
@@ -816,8 +865,17 @@
           class="mt-2 rounded-xl bg-ink-100 px-3 py-1.5 text-[12px] font-bold text-ink-600 active:scale-95">
           Contratar un paquete
         </button>
-      `)}
+      `, 'xl:sticky xl:top-4');
 
+  async function tabResumen(p) {
+    const [asistencias, pagos, citas, cumpl] = await Promise.all([
+      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
+      API.cumplimientoDePaciente(p.id)
+    ]);
+    const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
+    const prox = p.proxima_cita;
+
+    return `
       ${(cumpl.faltas > 0 || cumpl.canceladas > 0) ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Control de asistencia</p>
@@ -916,6 +974,14 @@
   /* ------------------------------------------------ Tab · Valoración ----- */
   async function tabValoracion(p) {
     const v = await API.valoracionDePaciente(p.id);
+    const versiones = await API.historialValoraciones(p.id);
+    const historial = versiones === null
+      ? '<p class="text-[12px] text-amber-700">Conservación de versiones pendiente de activar en Supabase.</p>'
+      : `<div class="space-y-2"><h3 class="font-bold">Historial de guardados (${versiones.length})</h3>${versiones.map(h => `
+          <details class="rounded-xl border border-ink-200 bg-white p-3">
+            <summary class="cursor-pointer text-[12px] font-bold">${E(new Date(h.creado_en).toLocaleString('es-MX'))} · ${h.drive_archivo_id ? 'Respaldado en Drive' : 'Respaldo en Drive pendiente'}</summary>
+            <pre class="mt-2 whitespace-pre-wrap break-words text-[12px]">${E(JSON.stringify(h.contenido.datos, null, 2))}</pre>
+          </details>`).join('')}</div>`;
 
     if (!v) {
       return `
@@ -959,6 +1025,7 @@
         </button>
       </div>
 
+      ${historial}
       ${activas.map((sec) => {
         const datos = todosLosDatos[sec.key] || {};
         const filas = sec.campos.map((c) => {
@@ -1289,8 +1356,11 @@
 
     const secciones = Store.SECCIONES_VALORACION.map((sec) => {
       const on = sec.always || activas.has(sec.key);
+      // Goniometría y fuerza traen una tabla (.tbl) ancha: su <section>, que
+      // es la que es hijo directo de la rejilla, ocupa las dos columnas.
+      const tieneTabla = sec.campos.some((c) => c.type === 'rom' || c.type === 'mmt');
       return `
-        <section data-sec="${sec.key}" class="overflow-hidden rounded-2xl border ${on ? 'border-brand-200' : 'border-ink-200/70'} bg-white shadow-card transition">
+        <section data-sec="${sec.key}" class="overflow-hidden rounded-2xl border ${on ? 'border-brand-200' : 'border-ink-200/70'} bg-white shadow-card transition ${tieneTabla ? 'lg:col-span-2' : ''}">
           <header class="flex items-center gap-3 px-4 py-3">
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl ${on ? 'bg-brand-100 text-brand-700' : 'bg-ink-100 text-ink-400'}">
               ${icon(sec.icono, 'h-4 w-4')}
@@ -1316,7 +1386,7 @@
     const html = `
       <!-- pb-48: deja sitio a la barra de guardar, que crece si aparecen el
            aviso «sin guardar» y el resultado del guardado -->
-      <div class="space-y-3.5 px-4 pb-48 pt-4 anim-fade-up">
+      <div class="space-y-3.5 px-4 pb-48 pt-4 anim-fade-up lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">Valoración inicial</p>
           <p class="text-[15px] font-extrabold text-brand-900">${E(p.nombre)}</p>
@@ -1562,7 +1632,7 @@
       </button>`;
 
     const html = `
-      <div class="space-y-4 px-4 pb-48 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pb-48 pt-4 anim-fade-up sm:grid sm:grid-cols-2 sm:items-start sm:gap-3 sm:space-y-0 lg:grid-cols-3 xl:grid-cols-4">
 
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">${base ? 'Editar rutina' : 'Nueva rutina'}</p>
@@ -1795,7 +1865,7 @@
     };
 
     const html = `
-      <div class="space-y-4 px-4 pb-4 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pb-4 pt-4 anim-fade-up lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
         <div class="rounded-2xl bg-gradient-to-br from-violet-600 to-violet-700 px-4 py-4 text-white shadow-card">
           <div class="flex items-center gap-2">${icon('sparkles', 'h-4 w-4')}
             <p class="text-[11px] font-extrabold uppercase tracking-wider">Programa de fidelidad</p></div>

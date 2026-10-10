@@ -47,6 +47,7 @@ export function crearCliente(env) {
   };
 
   return {
+    rpc: (nombre) => pedir(`rpc/${nombre}`, { method: 'POST', body: '{}' }),
     /** GET con filtros ya escritos en formato PostgREST. */
     select: (tabla, query) => pedir(`${tabla}?${query}`),
 

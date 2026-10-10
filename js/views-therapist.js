@@ -974,6 +974,14 @@
   /* ------------------------------------------------ Tab · Valoración ----- */
   async function tabValoracion(p) {
     const v = await API.valoracionDePaciente(p.id);
+    const versiones = await API.historialValoraciones(p.id);
+    const historial = versiones === null
+      ? '<p class="text-[12px] text-amber-700">Conservación de versiones pendiente de activar en Supabase.</p>'
+      : `<div class="space-y-2"><h3 class="font-bold">Historial de guardados (${versiones.length})</h3>${versiones.map(h => `
+          <details class="rounded-xl border border-ink-200 bg-white p-3">
+            <summary class="cursor-pointer text-[12px] font-bold">${E(new Date(h.creado_en).toLocaleString('es-MX'))} · ${h.drive_archivo_id ? 'Respaldado en Drive' : 'Respaldo en Drive pendiente'}</summary>
+            <pre class="mt-2 whitespace-pre-wrap break-words text-[12px]">${E(JSON.stringify(h.contenido.datos, null, 2))}</pre>
+          </details>`).join('')}</div>`;
 
     if (!v) {
       return `
@@ -1017,6 +1025,7 @@
         </button>
       </div>
 
+      ${historial}
       ${activas.map((sec) => {
         const datos = todosLosDatos[sec.key] || {};
         const filas = sec.campos.map((c) => {

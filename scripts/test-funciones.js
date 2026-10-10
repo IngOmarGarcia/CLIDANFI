@@ -608,5 +608,20 @@ const argsDe = (entrada, metodo) => (entrada.ops.find(([m]) => m === metodo) || 
   }
 
   console.log(`\n${'─'.repeat(60)}\n${pasan} pasan · ${fallan} fallan\n`);
+  {
+    const { API, registro } = montarAPI({ respuestas: {
+      perfiles: PERFIL_FISIO,
+      valoraciones: { data: { id: 'v1' }, error: null },
+      valoraciones_versiones: { data: [{ id: 'version-septiembre' }], error: null }
+    } });
+    await API.guardarValoracion('p1', { id: 'v1', secciones_activas: [], datos: {} });
+    const edit = ultima(registro, 'valoraciones', 'update');
+    check(edit.ops.some(([m, a]) => m === 'eq' && a[0] === 'paciente_id' && a[1] === 'p1'),
+      'editar valoración exige que pertenezca al paciente indicado');
+    const historial = await API.historialValoraciones('p1');
+    check(historial.length === 1, 'se leen versiones históricas sin filtro de mes');
+    const consulta = registro.find(r => r.tabla === 'valoraciones_versiones');
+    check(!consulta.ops.some(([m]) => m === 'gte' || m === 'lte'), 'el historial no excluye meses anteriores');
+  }
   process.exit(fallan ? 1 : 0);
 })();
