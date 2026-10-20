@@ -40,6 +40,30 @@ const ok = r => { if (r.error) throw new Error(r.error.message); return r.data; 
     }
   }
   if (!paciente) throw new Error('No existe el paciente ficticio; ejecutar con --crear');
+  let ejemploEvolucion;
+  if (process.argv.includes('--evolucion')) {
+    const texto = `${marca}. EJEMPLO DE NOTA DE EVOLUCIÓN. ` +
+      'Sesión de demostración sin aplicación clínica. Se registra movilidad de hombro ficticia, ' +
+      'ejercicio terapéutico de prueba y EVA 2/10. Objetivo: verificar el respaldo como ' +
+      'Evolución Prueba Drive y conservar una copia adicional al actualizar el documento.';
+    const existentes = ok(await sb.from('notas').select('id,creado_en')
+      .eq('paciente_id', paciente.id).like('texto', `${marca}. EJEMPLO DE NOTA DE EVOLUCIÓN.%`).limit(1));
+    ejemploEvolucion = existentes[0] || ok(await sb.from('notas').insert({
+      paciente_id: paciente.id, tipo: 'evolucion', texto, eva: 2, adjuntos: []
+    }).select('id,creado_en').single());
+    if (process.argv.includes('--actualizar-evolucion')) {
+      ok(await sb.from('notas').update({ texto: texto + ' ACTUALIZADO: segunda versión ficticia para comprobar el nombre del respaldo.' })
+        .eq('id', ejemploEvolucion.id).eq('paciente_id', paciente.id));
+    }
+  }
+  if (process.argv.includes('--reintentar-ejemplo')) {
+    const pendientes = ok(await sb.from('documentos_versiones').select('id,bloqueo')
+      .eq('paciente_id', paciente.id).is('drive_archivo_id', null).not('bloqueo', 'is', null));
+    for (const fila of pendientes) {
+      ok(await sb.from('documentos_versiones').update({ bloqueo: null, reintentar_en: new Date().toISOString() })
+        .eq('id', fila.id).eq('bloqueo', fila.bloqueo).eq('paciente_id', paciente.id).is('drive_archivo_id', null));
+    }
+  }
   if (process.argv.includes('--nueva-version')) {
     const fila = ok(await sb.from('valoraciones').select('id,datos').eq('paciente_id', paciente.id)
       .order('creado_en', { ascending: false }).limit(1).single());
@@ -52,5 +76,6 @@ const ok = r => { if (r.error) throw new Error(r.error.message); return r.data; 
   const versiones = ok(await sb.from('valoraciones_versiones')
     .select('id,creado_en,drive_archivo_id,intentos,ultimo_error,reintentar_en')
     .eq('paciente_id', paciente.id).order('creado_en', { ascending: false }));
-  console.log(JSON.stringify({ paciente: paciente.nombre, id: paciente.id, versiones }, null, 2));
+  console.log(JSON.stringify({ paciente: paciente.nombre, id: paciente.id,
+    ...(ejemploEvolucion ? { ejemplo_evolucion: ejemploEvolucion } : {}), versiones }, null, 2));
 })().catch(e => { console.error(e.message); process.exitCode = 1; });

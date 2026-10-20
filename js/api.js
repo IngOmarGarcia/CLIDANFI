@@ -1238,22 +1238,14 @@
   };
 
   const guardarRutina = async (pacienteId, { titulo, notas = '', items = [], id = null }) => {
-    let rutinaId = id;
-    if (rutinaId) {
-      ok(await sb.from('rutinas').update({ titulo, notas, activa: true }).eq('id', rutinaId));
-      ok(await sb.from('rutina_items').delete().eq('rutina_id', rutinaId));
-    } else {
-      const r = ok(await sb.from('rutinas').insert({ paciente_id: pacienteId, titulo, notas, activa: true }).select().single());
-      rutinaId = r.id;
-    }
-
-    if (items.length) {
-      ok(await sb.from('rutina_items').insert(items.map((it, i) => ({
-        rutina_id: rutinaId, ejercicio_id: it.ejercicio_id, orden: i,
+    const rutinaId = ok(await sb.rpc('guardar_rutina_completa', {
+      paciente: pacienteId, titulo, notas, rutina: id,
+      items: items.map(it => ({
+        ejercicio_id: it.ejercicio_id,
         series: Number(it.series) || 0, reps: Number(it.reps) || 0, hold: Number(it.hold) || 0,
         frecuencia: it.frecuencia || 'Diario', nota: it.nota || ''
-      }))));
-    }
+      }))
+    }));
     // El trigger `trg_una_rutina_activa` desactiva las demás
     const r = ok(await sb.from('rutinas').select(SELECT_RUTINA).eq('id', rutinaId).single());
     return _mapRutina(r);

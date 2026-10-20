@@ -13,7 +13,7 @@ contar filas por mes y revisar triggers y políticas. Revisar también las tarea
 de pg_cron, filtros activos del Table Editor, proyecto/esquema seleccionado,
 logs de borrado y respaldos anteriores. No ejecutar seed.sql para recuperar datos.
 
-## Activación (pendiente; no se ha desplegado)
+## Activación del respaldo de valoraciones
 
 1. Exportar la base actual. Ejecutar `supabase/valoraciones-respaldo.sql` en SQL
    Editor. Es transaccional y repetible. Conserva las filas actuales, captura
@@ -48,7 +48,8 @@ logs de borrado y respaldos anteriores. No ejecutar seed.sql para recuperar dato
 ## Resultado y verificación
 
 Cada versión se guarda como un PDF legible con nombre:
-`Nombre paciente - DD-MM-AAAA HH-mm-ss - Valoración inicial.pdf`.
+`HC Nombre paciente - DD-MM-AA HH-mm-ss.pdf`.
+Las ediciones llevan ` - Actualizado` antes de la fecha.
 El nombre usa la fecha de cada guardado en Ciudad de México; la hora distingue
 ediciones. El UUID se conserva en metadatos privados, sin aparecer en el nombre.
 Los respaldos anteriores adoptan el nuevo nombre automáticamente.
@@ -74,3 +75,59 @@ Referencias oficiales:
 - https://developers.google.com/workspace/drive/api/guides/manage-uploads
 - https://developers.google.com/workspace/drive/api/guides/properties
 - https://developers.google.com/identity/protocols/oauth2/web-server#offline
+
+## Ampliación a todos los documentos del expediente
+
+**Orden de instalación:** ejecutar `supabase/documentos-respaldo.sql` en el SQL
+Editor del mismo proyecto, después de `valoraciones-respaldo.sql`. Luego publicar
+el Worker y el frontend. La migración es transaccional, repetible y no borra datos.
+El frontend nuevo utiliza `guardar_rutina_completa`: no publicarlo antes del SQL.
+El Worker conserva el respaldo de historias incluso si aún falta esta migración;
+en ese caso informa el error de la nueva cola en `[drive].documentos.error`.
+
+Se incluyen fichas, notas de evolución, rutinas completas con ejercicios e
+indicaciones y recibos como PDF. Las citas están excluidas. Los estudios, informes, consentimientos
+y demás archivos del expediente conservan sus bytes y extensión originales.
+También se copian por separado las fotos de las evoluciones desde `evidencias`.
+Los enlaces externos de una nota se conservan como referencias en el PDF, sin
+descargar recursos de servidores externos. El catálogo de ejercicios y la marca
+de la clínica no son documentos de pacientes ni forman parte de esta cola.
+
+Ejemplos (hora de Ciudad de México):
+
+- `HC Omar García - Actualizado - 19-10-26 20-00-00.pdf`
+- `Evol. Omar García - 19-10-26 20-00-00.pdf`
+- `Rutina Omar García - Actualizado - 19-10-26 20-05-00.pdf`
+- `Estudio Omar García - Rodilla - 19-10-26 20-10-00.jpg`
+- `Evid. Omar García - Movilidad - 19-10-26 20-15-00.jpg`
+
+La primera instalación encola también los documentos existentes. Las versiones
+anteriores a instalar la ampliación solo pueden recuperarse si ya había otra
+copia. El historial nuevo es independiente de las filas originales y queda
+restringido a fisioterapeutas para lectura; únicamente el Worker procesa la cola.
+Cada edición crea un archivo distinto. Los reintentos recuperan PDFs y adjuntos
+ya subidos por su identificador privado; una nota solo se confirma como respaldada
+cuando también terminaron sus adjuntos. El cron procesa diez documentos por
+ejecución, además de diez historias; una cola inicial grande tarda varias pasadas.
+
+Los archivos ya respaldados se renombran automáticamente, hasta seis por pasada,
+sin cambiar sus enlaces. La versión más antigua de cada historia es la inicial;
+las posteriores reciben `Actualizado`. No se comparte ningún archivo públicamente.
+Para instalaciones anteriores, ejecutar `supabase/excluir-citas-respaldo.sql`
+desactiva el trigger de citas y cancela su cola sin tocar la agenda. El Worker
+también las excluye, cancela las subidas pendientes y manda a la papelera de
+Drive las copias de citas que ya se habían subido, tres por ejecución.
+Cada ejecución reserva margen de subpeticiones de Cloudflare: los documentos
+y adjuntos que no caben continúan en el próximo cron sin duplicar lo ya subido.
+
+Verificar después de instalar y publicar:
+
+```powershell
+node scripts/audit-respaldos.cjs
+```
+
+Consultar `documentos_versiones`: `origen`, `numero`, `drive_archivo_id`,
+`intentos`, `ultimo_error` y `reintentar_en`. Revisar los logs `[drive]` del Worker.
+Los binarios se leen de Storage durante el cron: no borrar el objeto original
+antes de terminar su respaldo. Las fotos o archivos que ya faltaban en Storage
+no se pueden reconstruir desde sus metadatos.

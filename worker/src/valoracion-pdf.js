@@ -8,6 +8,12 @@ const secciones = {
   marcha: 'Análisis de marcha', neuro: 'Valoración neurológica', diagnostico: 'Diagnóstico y plan'
 };
 const etiquetas = {
+  ficha: 'Ficha del paciente', evolucion: 'Nota de evolución', rutina: 'Rutina de ejercicios',
+  recibo: 'Recibo de pago', cita: 'Cita', texto: 'Evolución', eva: 'EVA (0-10)',
+  adjuntos: 'Evidencias', titulo: 'Título', notas: 'Notas', nombre: 'Nombre',
+  descripcion: 'Descripción', indicaciones: 'Indicaciones', series: 'Series',
+  repeticiones: 'Repeticiones', segundos: 'Duración (segundos)', nota: 'Observaciones',
+  monto: 'Importe (MXN)', metodo: 'Método de pago', concepto: 'Concepto', pagado_en: 'Fecha de pago',
   motivo: 'Motivo de consulta', inicio: 'Inicio de los síntomas', mecanismo: 'Mecanismo de lesión',
   ocupacion: 'Ocupación', actividad: 'Actividad física', referido: 'Médico que refiere',
   patologicos: 'Antecedentes patológicos', quirurgicos: 'Antecedentes quirúrgicos',
@@ -41,7 +47,7 @@ export async function generarValoracionPdf(version) {
   const nueva = () => {
     page = doc.addPage([595.28, 841.89]); y = 748;
     page.drawText('CLIDANFI', { x: 44, y: 798, size: 18, font: bold, color: azul });
-    page.drawText('VALORACIÓN DE FISIOTERAPIA', { x: 44, y: 776, size: 10, font: bold, color: tinta });
+    page.drawText(limpiar((version.titulo_documento || 'Valoración de fisioterapia').toUpperCase()), { x: 44, y: 776, size: 10, font: bold, color: tinta });
     page.drawLine({ start: { x: 44, y: 763 }, end: { x: 551, y: 763 }, thickness: 1, color: azul });
   };
   const asegurar = h => { if (!page || y - h < 60) nueva(); };
@@ -71,7 +77,7 @@ export async function generarValoracionPdf(version) {
   texto(version.paciente_nombre, { fuerte: true, size: 16 }); y -= 5;
   texto(`Creación: ${fecha(version.contenido.creado_en)}`);
   texto(`Versión guardada: ${fecha(version.creado_en)} (hora de Ciudad de México)`);
-  texto(`Valoración: ${version.contenido.id || version.valoracion_id || '-'}`, { size: 8 });
+  texto(`Documento: ${version.contenido.id || version.valoracion_id || '-'}`, { size: 8 });
   texto(`Versión: ${version.id}`, { size: 8 }); y -= 12;
   const render = (key, value, indent = 0) => {
     if (!tieneDato(value)) return;
@@ -99,7 +105,7 @@ export async function generarValoracionPdf(version) {
       x: 44, y: 28, size: 8, font: normal, color: tinta
     });
   });
-  doc.setTitle(`Valoración - ${limpiar(version.paciente_nombre)}`);
+  doc.setTitle(`${version.titulo_documento || 'Valoración'} - ${limpiar(version.paciente_nombre)}`);
   doc.setAuthor('CLIDANFI');
   return doc.save();
 }

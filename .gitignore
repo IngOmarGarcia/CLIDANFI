@@ -15,6 +15,7 @@ Thumbs.db
 .idea/
 *.log
 .netlify/
+supabase/.temp/
 .env
 .env.*
 # …salvo la plantilla, que es justo lo que necesita quien clone el repo.

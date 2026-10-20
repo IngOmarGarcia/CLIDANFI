@@ -12,17 +12,54 @@ const env = {
   SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'server'
 };
 test('nombre legible con fecha local del guardado y tipo, sin UUID', () => {
-  assert.equal(nombreRespaldo(version), 'Ana _ Pérez - 09-10-2026 06-00-00 - Valoración inicial.pdf');
+  assert.equal(nombreRespaldo(version), 'HC Ana _ Pérez - 09-10-26 06-00-00.pdf');
+  assert.equal(nombreRespaldo({ ...version, actualizado: true }), 'HC Ana _ Pérez - Actualizado - 09-10-26 06-00-00.pdf');
+  assert.equal(nombreRespaldo({ ...version, origen: 'notas', numero: 2 }), 'Evol. Ana _ Pérez - Actualizado - 09-10-26 06-00-00.pdf');
   assert.ok(!nombreRespaldo(version).includes(version.id));
   assert.notEqual(nombreRespaldo(version), nombreRespaldo({ ...version, creado_en: '2026-10-09T12:01:00Z' }));
 });
 test('sin autorización no consume la cola', async () => {
   assert.deepEqual(await respaldarValoraciones({}), { omitido: 'Drive pendiente de autorización' });
 });
+
+test('acorta documentos y fotos existentes conservando sus identificadores privados', async () => {
+  const original = globalThis.fetch;
+  const doc = { ...version, origen: 'notas', numero: 2, contenido: {
+    ...version.contenido, adjuntos: [{ ruta: 'paciente/foto.jpg', titulo: 'Movilidad' }] } };
+  const cambios = [];
+  try {
+    globalThis.fetch = async (url, opts = {}) => {
+      url = String(url);
+      if (url.includes('oauth2')) return Response.json({ access_token: 'access' });
+      if (url.includes('/about')) return Response.json({ user: { emailAddress: 'clidanfi@gmail.com' } });
+      if (url.includes('/rpc/')) return Response.json([]);
+      if (url.includes('/rest/v1/documentos_versiones?')) {
+        if (opts.method === 'DELETE') return new Response(null, { status: 204 });
+        return Response.json(url.includes('origen=eq.citas') ? [] : [doc]);
+      }
+      if (url.includes('/drive/v3/files?')) return Response.json({ files: ['pdf', 'adjunto-0'].map(clave => ({
+        id: clave, mimeType: clave === 'pdf' ? 'application/pdf' : 'image/jpeg',
+        appProperties: { clidanfi_documento: `${version.id}:${clave}`, clidanfi_lote: version.id, clidanfi_nombre: '3' }
+      })) });
+      assert.equal(opts.method, 'PATCH');
+      assert.ok(!url.includes('/upload/'));
+      const body = JSON.parse(opts.body);
+      cambios.push(body);
+      assert.equal(body.appProperties.clidanfi_lote, version.id);
+      assert.equal(body.appProperties.clidanfi_nombre, '4');
+      return Response.json({ id: url.includes('/pdf?') ? 'pdf' : 'adjunto-0' });
+    };
+    const result = await respaldarValoraciones(env);
+    assert.equal(result.renombrados, 2);
+    assert.equal(result.conversionesFallidas, 0);
+    assert.equal(cambios[0].name, 'Evol. Ana _ Pérez - Actualizado - 09-10-26 06-00-00.pdf');
+    assert.equal(cambios[1].name, 'Evid. Ana _ Pérez - Movilidad - Actualizado - 09-10-26 06-00-00.jpg');
+  } finally { globalThis.fetch = original; }
+});
 test('sube copia completa y reutiliza archivo en reintento; conserva errores', async () => {
   const original = globalThis.fetch;
   try {
-    for (const modo of ['nuevo', 'existente', 'fallo', 'otra-cuenta', 'convertir-json', 'renombrar-pdf']) {
+    for (const modo of ['nuevo', 'existente', 'fallo', 'otra-cuenta', 'convertir-json', 'renombrar-pdf', 'renombrar-edicion']) {
       const calls = [];
       globalThis.fetch = async (url, opts = {}) => {
         calls.push({ url: String(url), opts });
@@ -30,8 +67,15 @@ test('sube copia completa y reutiliza archivo en reintento; conserva errores', a
         if (String(url).includes('/about')) return Response.json({ user: {
           emailAddress: modo === 'otra-cuenta' ? 'otra@gmail.com' : 'clidanfi@gmail.com'
         } });
-        if (String(url).includes('/rpc/')) return Response.json(['convertir-json', 'renombrar-pdf'].includes(modo) ? [] : [version]);
-        if (String(url).includes('/rest/v1/valoraciones_versiones?') && !opts.method) return Response.json([version]);
+        if (String(url).includes('/rest/v1/documentos_versiones?')) {
+          return opts.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json([]);
+        }
+        if (String(url).includes('/rpc/reclamar_respaldos_documento')) return Response.json([]);
+        if (String(url).includes('/rpc/')) return Response.json(['convertir-json', 'renombrar-pdf', 'renombrar-edicion'].includes(modo) ? [] : [version]);
+        if (String(url).includes('/rest/v1/valoraciones_versiones?') && !opts.method) {
+          return Response.json(modo === 'renombrar-edicion' && String(url).includes('select=id')
+            ? [{ id: 'version-inicial' }] : [version]);
+        }
         if (String(url).includes('/upload/')) {
           if (modo === 'fallo') return new Response('', { status: 503 });
           const multipart = await opts.body.text();
@@ -45,18 +89,18 @@ test('sube copia completa y reutiliza archivo en reintento; conserva errores', a
           return Response.json({ id: 'drive-id' });
         }
         if (String(url).includes('googleapis.com/drive/v3/files?')) {
-          if (new URL(url).searchParams.get('q').includes('application/json')) return Response.json({
-            files: ['convertir-json', 'renombrar-pdf'].includes(modo) ? [{ id: 'drive-id',
-              mimeType: modo === 'renombrar-pdf' ? 'application/pdf' : 'application/json',
+          if (new URL(url).searchParams.get('q').includes("key='clidanfi_nombre'")) return Response.json({
+            files: ['convertir-json', 'renombrar-pdf', 'renombrar-edicion'].includes(modo) ? [{ id: 'drive-id',
+              mimeType: modo === 'convertir-json' ? 'application/json' : 'application/pdf',
               appProperties: { clidanfi_version: version.id } }] : []
           });
           return Response.json({ files: modo === 'existente' ? [{ id: 'drive-id', mimeType: 'application/pdf' }] : [] });
         }
         if (opts.method === 'PATCH' && String(url).includes('googleapis.com/drive/v3/files/')) {
           const patch = JSON.parse(opts.body);
-          assert.equal(patch.name, nombreRespaldo(version));
+          assert.equal(patch.name, nombreRespaldo({ ...version, actualizado: modo === 'renombrar-edicion' }));
           assert.equal(patch.appProperties.clidanfi_version, version.id);
-          assert.equal(patch.appProperties.clidanfi_nombre, '2');
+          assert.equal(patch.appProperties.clidanfi_nombre, '4');
           return Response.json({ id: 'drive-id' });
         }
         if (opts.method === 'PATCH') return new Response(null, { status: 204 });
@@ -74,7 +118,7 @@ test('sube copia completa y reutiliza archivo en reintento; conserva errores', a
         assert.equal(result.conversionesFallidas, 0);
         continue;
       }
-      if (modo === 'renombrar-pdf') {
+      if (['renombrar-pdf', 'renombrar-edicion'].includes(modo)) {
         assert.equal(result.renombrados, 1);
         assert.ok(!calls.some(c => c.url.includes('/upload/')));
         continue;
