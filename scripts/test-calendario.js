@@ -7,7 +7,8 @@ const citas = [
   { inicia_en: '2026-10-31T09:00:00', estado: 'cancelada', paciente_nombre: 'Dos' },
   { inicia_en: '2026-09-30T09:00:00', estado: 'agendada', paciente_nombre: 'Tres' }
 ];
-const context = { window: {}, UI: { isoDay, escapeHtml: String, fmtTime: () => '09:00', fmtDate: String, icon: () => '', emptyState: () => 'Sin citas' }, API: { historialCitas: async () => citas }, location: {} };
+let sheetAbierta;
+const context = { window: {}, UI: { isoDay, escapeHtml: String, fmtTime: () => '09:00', fmtDate: String, badge: (_, tono) => tono, openSheet: sheet => { sheetAbierta = sheet; }, icon: () => '', emptyState: () => 'Sin citas' }, API: { historialCitas: async () => citas }, location: {} };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync('js/views-therapist.js', 'utf8'), context);
 (async () => {
@@ -17,11 +18,18 @@ vm.runInContext(fs.readFileSync('js/views-therapist.js', 'utf8'), context);
   const escala = { value: 'mes', selectedOptions: [{ text: 'Mes' }], addEventListener(_, cb) { this.change = cb; } };
   const grafica = { innerHTML: '' };
   const elements = { '#agenda-mes': { addEventListener() {} }, '#agenda-agregar': null, '#agenda-escala': escala, '#agenda-grafica': grafica };
-  vista.onMount({ querySelector: id => elements[id] });
+  const celda = { dataset: { agendaDia: '2026-10-01' }, addEventListener(_, cb) { this.click = cb; } };
+  vista.onMount({ querySelector: id => elements[id], querySelectorAll: () => [celda] });
+  celda.click({ preventDefault() {} });
+  assert(sheetAbierta.title.includes('octubre'));
+  assert(sheetAbierta.body.includes('Uno'));
+  assert(sheetAbierta.body.includes('Ver cita y acciones'));
   assert(grafica.innerHTML.includes('3 citas en el periodo'));
+  assert(grafica.innerHTML.includes('octubre 2026'));
   for (const tipo of ['dia', 'semana']) {
     escala.value = tipo; escala.change();
     assert(grafica.innerHTML.includes('2 citas en el periodo'), tipo);
+    assert(grafica.innerHTML.includes(tipo === 'dia' ? '01 octubre' : '01–04 octubre'));
   }
   escala.value = 'ano'; escala.change();
   assert(grafica.innerHTML.includes('3 citas en el periodo'));

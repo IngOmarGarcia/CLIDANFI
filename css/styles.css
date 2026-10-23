@@ -337,6 +337,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand-600); }
   #view-root { overflow: visible !important; padding-bottom: 0 !important; }
 }
 /* Agenda mensual y estadísticas */
+.agenda-day-details{display:grid;gap:14px}.agenda-appointment{border:1px solid #dce4e9;border-radius:16px;padding:18px;background:#fff}.agenda-appointment h3{font-size:18px;font-weight:800;color:#243447}.agenda-appointment p{font-size:13px;color:#617184;margin-top:8px}.agenda-appointment .agenda-notes{white-space:pre-wrap;background:#f1f5f9;border-radius:8px;padding:10px}.agenda-detail-action{margin-top:14px;padding:8px 12px;border-radius:9px;background:#e0f2fe;color:#0369a1;font-size:13px;font-weight:700}
 .agenda-panel{background:#fff;border:1px solid #dce4e9;border-radius:18px;padding:16px;min-width:0}
 .agenda-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 .agenda-toolbar h2{font-weight:800;text-transform:capitalize;color:#243447}

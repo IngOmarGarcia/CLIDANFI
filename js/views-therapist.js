@@ -594,7 +594,7 @@
     const celdas = Array.from({ length: 42 }, (_, i) => {
       const d = new Date(primero); d.setDate(d.getDate() + i);
       const dia = isoDay(d), lista = grupos.get(dia) || [];
-      return `<a class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${dia}, ${lista.length} citas" ${dia === hoy ? 'aria-current="date"' : ''}>
+      return `<a data-agenda-dia="${dia}" class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${E(d.toLocaleDateString('es-MX', { dateStyle: 'full' }))}, ${lista.length} citas" ${dia === hoy ? 'aria-current="date"' : ''}>
         <span class="agenda-day ${dia === hoy ? 'agenda-today' : ''}">${d.getDate()}</span>
         ${lista.slice(0, 2).map(c => `<span class="agenda-event agenda-${E(c.estado)}">${E(fmtTime(c.inicia_en))} ${E(c.paciente_nombre)}</span>`).join('')}
         ${lista.length ? `<span class="agenda-count">${lista.length} cita${lista.length === 1 ? '' : 's'}</span>` : ''}</a>`;
@@ -624,6 +624,30 @@
         <div id="agenda-grafica" aria-live="polite"></div>
       </section></div>${fab('nueva-cita', 'Agendar cita', 'bg-brand-600')}`,
       onMount(root) {
+        root.querySelectorAll('[data-agenda-dia]').forEach(celda => celda.addEventListener('click', e => {
+          e.preventDefault();
+          const dia = celda.dataset.agendaDia;
+          const lista = grupos.get(dia) || [];
+          openSheet({
+            title: new Date(`${dia}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+            subtitle: `${lista.length} cita${lista.length === 1 ? '' : 's'} · Agenda del día`,
+            size: 'tall',
+            body: `<div class="agenda-day-details">${lista.length ? lista.map(c => {
+              const [tono, estado] = ESTADO_CITA[c.estado] || ESTADO_CITA.agendada;
+              const fin = new Date(new Date(c.inicia_en).getTime() + (c.duracion_min || 45) * 60000);
+              return `<article class="agenda-appointment"><div class="agenda-toolbar"><strong>${E(fmtTime(c.inicia_en))} – ${E(fmtTime(fin))}</strong>${badge(estado, tono)}</div>
+                <h3>${E(c.paciente_nombre)}</h3><p>${E(c.motivo || 'Sin motivo registrado')} · ${E(String(c.duracion_min || 45))} min</p>
+                ${c.precio != null ? `<p>Precio: ${E(fmtMoney(c.precio))}</p>` : ''}
+                ${c.notas ? `<p class="agenda-notes">${E(c.notas)}</p>` : ''}
+                <button class="agenda-detail-action" data-abrir-cita="${E(c.id)}">Ver cita y acciones</button></article>`;
+            }).join('') : emptyState('calendar', 'Sin citas este día', 'Este día no tiene citas registradas.')}</div>`,
+            footer: dia >= hoy ? '<button id="agenda-dia-agregar" class="agenda-add" style="width:100%">+ Agendar cita este día</button>' : '',
+            onMount(sheet) {
+              sheet.querySelector('#agenda-dia-agregar')?.addEventListener('click', () => sheetCita(null, null, dia));
+              sheet.querySelectorAll('[data-abrir-cita]').forEach(b => b.addEventListener('click', () => sheetMenuCita(b.dataset.abrirCita)));
+            }
+          });
+        }));
         root.querySelector('#agenda-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = enlace(e.target.value); });
         root.querySelector('#agenda-agregar')?.addEventListener('click', () => sheetCita(null, null, seleccionado));
         const escala = root.querySelector('#agenda-escala');
@@ -654,8 +678,19 @@
             const k = clave(fecha); buckets.set(k, (buckets.get(k) || 0) + 1);
           });
           const max = Math.max(1, ...buckets.values());
+          const etiqueta = k => {
+            if (tipo === 'ano') return k;
+            const d = new Date(`${k}${tipo === 'mes' ? '-01' : ''}T12:00:00`);
+            if (tipo === 'mes') return d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).replace(' de ', ' ');
+            if (tipo === 'dia') return `${String(d.getDate()).padStart(2, '0')} ${d.toLocaleDateString('es-MX', { month: 'long' })}`;
+            const fin = new Date(d); fin.setDate(fin.getDate() + 6);
+            const desde = k < `${mes}-01` ? new Date(inicio) : d;
+            const ultimo = new Date(inicio); ultimo.setMonth(ultimo.getMonth() + 1, 0);
+            const hasta = fin > ultimo ? ultimo : fin;
+            return `${String(desde.getDate()).padStart(2, '0')}–${String(hasta.getDate()).padStart(2, '0')} ${hasta.toLocaleDateString('es-MX', { month: 'long' })}`;
+          };
           const total = [...buckets.values()].reduce((a, b) => a + b, 0);
-          root.querySelector('#agenda-grafica').innerHTML = `<p class="agenda-total">${total} citas en el periodo</p><div class="agenda-bars" role="list" aria-label="Cantidad de citas por ${E(escala.selectedOptions[0].text)}">${[...buckets].map(([k, n]) => `<div class="agenda-bar-row" role="listitem"><span>${tipo === 'semana' ? 'Desde ' : ''}${E(k)}</span><div class="agenda-track"><div class="agenda-bar" style="width:${n / max * 100}%"></div></div><strong>${n}</strong></div>`).join('')}</div>${total ? '' : '<p class="agenda-hint">No hay citas registradas en este periodo.</p>'}`;
+          root.querySelector('#agenda-grafica').innerHTML = `<p class="agenda-total">${total} citas en el periodo</p><div class="agenda-bars" role="list" aria-label="Cantidad de citas por ${E(escala.selectedOptions[0].text)}">${[...buckets].map(([k, n]) => `<div class="agenda-bar-row" role="listitem"><span>${E(etiqueta(k))}</span><div class="agenda-track"><div class="agenda-bar" style="width:${n / max * 100}%"></div></div><strong>${n}</strong></div>`).join('')}</div>${total ? '' : '<p class="agenda-hint">No hay citas registradas en este periodo.</p>'}`;
         };
         escala.addEventListener('change', pintar); pintar();
       }
