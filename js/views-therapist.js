@@ -644,21 +644,19 @@
         <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=cumpleanos&m=${mes}">Cumpleaños</a>
       </div>
       <section class="agenda-panel" aria-label="Calendario de citas">
-        <div class="agenda-toolbar"><h2>${E(inicio.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
+        <div class="agenda-toolbar"><div class="agenda-title"><h2>${E(inicio.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
+          <details class="agenda-help"><summary aria-label="Ayuda del calendario">?</summary><div class="agenda-help-content">
+            <strong>Colores del calendario</strong>
+            <div class="agenda-legend" aria-label="Colores del calendario"><span><i class="agenda-key-pending" aria-hidden="true"></i>Citas agendadas</span><span><i class="agenda-key-appointment" aria-hidden="true"></i>Otras citas</span><span><i class="agenda-key-birthday" aria-hidden="true"></i>Cumpleaños</span><span><i class="agenda-key-holiday" aria-hidden="true"></i>Festivos</span><span><i class="agenda-key-selected" aria-hidden="true"></i>Día seleccionado</span></div>
+            <p class="agenda-hint">Las citas completadas, canceladas o con falta se agrupan en azul. Los indicadores se apilan cuando coinciden varios eventos. Selecciona un día para ver sus detalles.</p>
+            <p class="agenda-hint">Los festivos no bloquean la agenda. Se muestran descansos nacionales recurrentes según la <a href="https://www.profedet.gob.mx/micrositio/index.php/dias-de-descanso" target="_blank" rel="noopener">PROFEDET</a>; no incluye jornadas electorales ni festivos locales.</p>
+            <strong>Estadísticas</strong>
+            <p class="agenda-hint">Conteo por fecha de la cita, incluyendo todos los estados. Año muestra el historial completo; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas comienzan en lunes y cuentan solo los días del mes elegido.</p>
+          </div></details></div>
           <div><a href="${enlace(mover(-1))}" aria-label="Mes anterior">‹</a><a href="${enlace(mover(1))}" aria-label="Mes siguiente">›</a></div>
           <label>Ir al mes <input id="agenda-mes" type="month" value="${mes}" /></label></div>
         <div class="agenda-week">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<span>${d}</span>`).join('')}</div>
         <div class="agenda-grid">${celdas}</div>
-        <div class="agenda-legend" aria-label="Colores del calendario"><span><i class="agenda-key-pending" aria-hidden="true"></i>Citas agendadas</span><span><i class="agenda-key-appointment" aria-hidden="true"></i>Otras citas</span><span><i class="agenda-key-birthday" aria-hidden="true"></i>Cumpleaños</span><span><i class="agenda-key-holiday" aria-hidden="true"></i>Festivos</span><span><i class="agenda-key-selected" aria-hidden="true"></i>Día seleccionado</span></div>
-        <div class="agenda-example"><div><strong>Ejemplo de un día con todos los indicadores</strong><p class="agenda-hint">Muestra visual con cantidades de ejemplo. Las citas completadas, canceladas o con falta se agrupan en azul.</p></div>
-          <div class="agenda-cell agenda-selected agenda-example-cell" aria-label="Ejemplo visual, no corresponde a una fecha real"><span class="agenda-day">15</span><span class="agenda-day-markers">
-            <span class="agenda-marker agenda-marker-pending"><i aria-hidden="true"></i><span>2 agendadas</span></span>
-            <span class="agenda-marker agenda-marker-appointment"><i aria-hidden="true"></i><span>1 otra cita</span></span>
-            <span class="agenda-marker agenda-marker-birthday"><i aria-hidden="true"></i><span>1 cumpleaños</span></span>
-            <span class="agenda-marker agenda-marker-holiday"><i aria-hidden="true"></i><span>1 festivo</span></span>
-          </span></div></div>
-        <p class="agenda-hint">Los indicadores se apilan cuando coinciden varios eventos. Selecciona un día para ver los detalles. Los festivos no bloquean la agenda.</p>
-        <p class="agenda-hint">Descansos nacionales recurrentes según la <a href="https://www.profedet.gob.mx/micrositio/index.php/dias-de-descanso" target="_blank" rel="noopener">PROFEDET</a>; no incluye jornadas electorales ni festivos locales.</p>
       </section>
       <section class="agenda-panel"><div class="agenda-toolbar"><h2>${E(fmtDate(seleccionado))} · ${diarias.length} citas</h2>
         ${seleccionado >= hoy ? `<button id="agenda-agregar" class="agenda-add">+ Agendar cita</button>` : ''}</div>
@@ -666,7 +664,6 @@
       </section>
       <section class="agenda-panel"><div class="agenda-toolbar"><h2>Estadísticas de citas</h2>
         <label>Agrupar por <select id="agenda-escala"><option value="mes">Mes</option><option value="ano">Año</option><option value="semana">Semana</option><option value="dia">Día</option></select></label></div>
-        <p class="agenda-hint">Conteo por fecha de la cita, incluyendo todos los estados. Año muestra el historial completo; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas comienzan en lunes y cuentan solo los días del mes elegido.</p>
         <div id="agenda-grafica" aria-live="polite"></div>
       </section></div>${fab('nueva-cita', 'Agendar cita', 'bg-brand-600')}`,
       onMount(root) {
