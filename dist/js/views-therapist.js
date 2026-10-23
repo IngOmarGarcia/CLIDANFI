@@ -574,8 +574,97 @@
   /* ======================================================================
      2 · AGENDA
      ====================================================================== */
+  async function calendarioAgenda(query) {
+    const citas = await API.historialCitas();
+    const hoy = isoDay(new Date());
+    const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.m || '') ? query.m : hoy.slice(0, 7);
+    const inicio = new Date(`${mes}-01T12:00:00`);
+    const seleccionado = /^\d{4}-\d{2}-\d{2}$/.test(query.d || '') && query.d.startsWith(mes)
+      ? query.d : hoy.startsWith(mes) ? hoy : `${mes}-01`;
+    const grupos = new Map();
+    citas.forEach(c => {
+      const dia = isoDay(c.inicia_en);
+      if (!grupos.has(dia)) grupos.set(dia, []);
+      grupos.get(dia).push(c);
+    });
+    const enlace = (m, d) => `#/t/agenda?f=calendario&m=${m}${d ? `&d=${d}` : ''}`;
+    const mover = n => { const d = new Date(inicio); d.setMonth(d.getMonth() + n); return isoDay(d).slice(0, 7); };
+    const primero = new Date(inicio);
+    primero.setDate(1 - (inicio.getDay() + 6) % 7);
+    const celdas = Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(primero); d.setDate(d.getDate() + i);
+      const dia = isoDay(d), lista = grupos.get(dia) || [];
+      return `<a class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${dia}, ${lista.length} citas" ${dia === hoy ? 'aria-current="date"' : ''}>
+        <span class="agenda-day ${dia === hoy ? 'agenda-today' : ''}">${d.getDate()}</span>
+        ${lista.slice(0, 2).map(c => `<span class="agenda-event agenda-${E(c.estado)}">${E(fmtTime(c.inicia_en))} ${E(c.paciente_nombre)}</span>`).join('')}
+        ${lista.length ? `<span class="agenda-count">${lista.length} cita${lista.length === 1 ? '' : 's'}</span>` : ''}</a>`;
+    }).join('');
+    const diarias = grupos.get(seleccionado) || [];
+    return { titulo: 'Agenda', html: `<div class="space-y-4 px-4 pt-4 anim-fade-up">
+      <div class="flex gap-1 rounded-2xl bg-ink-100 p-1">
+        <a class="flex-1 rounded-xl bg-white py-2 text-center font-bold text-brand-700" href="${enlace(mes)}">Calendario</a>
+        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=hoy">Hoy</a>
+        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=proximas">Próximas</a>
+      </div>
+      <section class="agenda-panel" aria-label="Calendario de citas">
+        <div class="agenda-toolbar"><h2>${E(inicio.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
+          <div><a href="${enlace(mover(-1))}" aria-label="Mes anterior">‹</a><a href="${enlace(hoy.slice(0, 7), hoy)}">Hoy</a><a href="${enlace(mover(1))}" aria-label="Mes siguiente">›</a></div>
+          <label>Ir al mes <input id="agenda-mes" type="month" value="${mes}" /></label></div>
+        <div class="agenda-week">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<span>${d}</span>`).join('')}</div>
+        <div class="agenda-grid">${celdas}</div>
+        <p class="agenda-hint">Selecciona un día para ver sus citas. En fechas futuras puedes agendar una nueva.</p>
+      </section>
+      <section class="agenda-panel"><div class="agenda-toolbar"><h2>${E(fmtDate(seleccionado))} · ${diarias.length} citas</h2>
+        ${seleccionado >= hoy ? `<button id="agenda-agregar" class="agenda-add">+ Agendar cita</button>` : ''}</div>
+        <div class="space-y-2">${diarias.length ? diarias.map(c => citaRow(c)).join('') : emptyState('calendar', 'Sin citas este día', 'Selecciona otra fecha o agenda una cita.')}</div>
+      </section>
+      <section class="agenda-panel"><div class="agenda-toolbar"><h2>Estadísticas de citas</h2>
+        <label>Agrupar por <select id="agenda-escala"><option value="mes">Mes</option><option value="ano">Año</option><option value="semana">Semana</option><option value="dia">Día</option></select></label></div>
+        <p class="agenda-hint">Conteo por fecha de la cita, incluyendo todos los estados. Año muestra el historial completo; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas comienzan en lunes y cuentan solo los días del mes elegido.</p>
+        <div id="agenda-grafica" aria-live="polite"></div>
+      </section></div>${fab('nueva-cita', 'Agendar cita', 'bg-brand-600')}`,
+      onMount(root) {
+        root.querySelector('#agenda-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = enlace(e.target.value); });
+        root.querySelector('#agenda-agregar')?.addEventListener('click', () => sheetCita(null, null, seleccionado));
+        const escala = root.querySelector('#agenda-escala');
+        const pintar = () => {
+          const tipo = escala.value, buckets = new Map();
+          const clave = fecha => {
+            if (tipo === 'ano') return fecha.slice(0, 4);
+            if (tipo === 'mes') return fecha.slice(0, 7);
+            if (tipo === 'dia') return fecha;
+            const d = new Date(`${fecha}T12:00:00`); d.setDate(d.getDate() - (d.getDay() + 6) % 7);
+            return isoDay(d);
+          };
+          if (tipo === 'ano') {
+            const anos = citas.map(c => Number(isoDay(c.inicia_en).slice(0, 4)));
+            const fin = Math.max(Number(mes.slice(0, 4)), ...anos);
+            const ini = Math.min(Number(mes.slice(0, 4)), ...anos);
+            for (let a = ini; a <= fin; a++) buckets.set(String(a), 0);
+          } else if (tipo === 'mes') {
+            for (let m = 1; m <= 12; m++) buckets.set(`${mes.slice(0, 4)}-${String(m).padStart(2, '0')}`, 0);
+          } else {
+            const d = new Date(inicio);
+            while (isoDay(d).startsWith(mes)) { buckets.set(clave(isoDay(d)), 0); d.setDate(d.getDate() + 1); }
+          }
+          citas.forEach(c => {
+            const fecha = isoDay(c.inicia_en);
+            if (tipo === 'mes' && !fecha.startsWith(mes.slice(0, 4))) return;
+            if ((tipo === 'dia' || tipo === 'semana') && !fecha.startsWith(mes)) return;
+            const k = clave(fecha); buckets.set(k, (buckets.get(k) || 0) + 1);
+          });
+          const max = Math.max(1, ...buckets.values());
+          const total = [...buckets.values()].reduce((a, b) => a + b, 0);
+          root.querySelector('#agenda-grafica').innerHTML = `<p class="agenda-total">${total} citas en el periodo</p><div class="agenda-bars" role="list" aria-label="Cantidad de citas por ${E(escala.selectedOptions[0].text)}">${[...buckets].map(([k, n]) => `<div class="agenda-bar-row" role="listitem"><span>${tipo === 'semana' ? 'Desde ' : ''}${E(k)}</span><div class="agenda-track"><div class="agenda-bar" style="width:${n / max * 100}%"></div></div><strong>${n}</strong></div>`).join('')}</div>${total ? '' : '<p class="agenda-hint">No hay citas registradas en este periodo.</p>'}`;
+        };
+        escala.addEventListener('change', pintar); pintar();
+      }
+    };
+  }
+
   async function agenda(_params, query) {
-    const filtro = query.f || 'proximas';
+    const filtro = query.f || 'calendario';
+    if (filtro === 'calendario') return calendarioAgenda(query);
     const citas = filtro === 'hoy' ? await API.citasDeHoy() : await API.proximasCitas({ dias: 21 });
 
     // Agrupa por día
@@ -600,7 +689,7 @@
     const html = `
       <div class="space-y-4 px-4 pt-4 anim-fade-up">
         <div class="flex gap-1 rounded-2xl bg-ink-100 p-1">
-          ${tab('hoy', 'Hoy')}${tab('proximas', 'Próximas')}
+          ${tab('calendario', 'Calendario')}${tab('hoy', 'Hoy')}${tab('proximas', 'Próximas')}
         </div>
 
         <button data-action="ver-recordatorios"
@@ -2024,14 +2113,14 @@
    *   · **Huecos ocupados.** Se avisa si el horario pisa otra cita viva. No se
    *     prohíbe —hay clínicas con dos camillas— pero se dice antes de guardar.
    */
-  async function sheetCita(pacienteId = null, citaId = null) {
+  async function sheetCita(pacienteId = null, citaId = null, fechaInicial = null) {
     const [pacs, cita, cfg] = await Promise.all([
       API.listarPacientes(),
       citaId ? API.obtenerCita(citaId) : Promise.resolve(null),
       API.getConfig()
     ]);
 
-    const def = cita ? new Date(cita.inicia_en) : (() => { const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1); return d; })();
+    const def = cita ? new Date(cita.inicia_en) : fechaInicial ? new Date(`${fechaInicial}T09:00:00`) : (() => { const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1); return d; })();
     const precioDef = cita && cita.precio !== null && cita.precio !== undefined ? cita.precio : cfg.precio_sesion;
 
     /* Reagendar no cambia de paciente: el selector de «nuevo» solo aparece al

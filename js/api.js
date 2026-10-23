@@ -603,6 +603,18 @@
 
   const SELECT_CITA = '*, pacientes(id, nombre, telefono, diagnostico)';
 
+  // Paginar evita perder silenciosamente el historial al superar 1.000 filas.
+  const historialCitas = async () => {
+    const rows = [];
+    for (let desde = 0; ; desde += 1000) {
+      const pagina = ok(await sb.from('citas').select(SELECT_CITA)
+        .order('inicia_en', { ascending: true }).order('id', { ascending: true })
+        .range(desde, desde + 999));
+      rows.push(...pagina);
+      if (pagina.length < 1000) return _conNombre(rows);
+    }
+  };
+
   const citasDeHoy = async () => {
     const hoy = isoDay(new Date());
     return _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
@@ -1810,7 +1822,7 @@
     setConfig, subirLogo, quitarLogo,
     listarPacientes, obtenerPaciente, crearPaciente, crearPacienteExpres,
     actualizarPaciente, eliminarPaciente,
-    citasDeHoy, proximasCitas, citasDeManana, citasDePaciente, proximaCitaDePaciente, obtenerCita,
+    historialCitas, citasDeHoy, proximasCitas, citasDeManana, citasDePaciente, proximaCitaDePaciente, obtenerCita,
     crearCita, actualizarCita, cancelarCita, marcarFalta, reactivarCita,
     eliminarCita, conflictosDeAgenda, cumplimientoDePaciente,
     registrarAsistencia, asistenciasDePaciente, eliminarAsistencia,
