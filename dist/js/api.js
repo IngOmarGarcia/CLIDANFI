@@ -618,8 +618,8 @@
   const citasDeHoy = async () => {
     const hoy = isoDay(new Date());
     return _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
-      .gte('inicia_en', `${hoy}T00:00:00`)
-      .lte('inicia_en', `${hoy}T23:59:59`)
+      .gte('inicia_en', new Date(`${hoy}T00:00:00`).toISOString())
+      .lte('inicia_en', new Date(`${hoy}T23:59:59.999`).toISOString())
       .order('inicia_en', { ascending: true })));
   };
 
@@ -1731,8 +1731,8 @@
     const manana = isoDay(addDays(new Date(), 1));
     return _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
       .eq('estado', 'agendada')
-      .gte('inicia_en', `${manana}T00:00:00`)
-      .lte('inicia_en', `${manana}T23:59:59`)
+      .gte('inicia_en', new Date(`${manana}T00:00:00`).toISOString())
+      .lte('inicia_en', new Date(`${manana}T23:59:59.999`).toISOString())
       .order('inicia_en', { ascending: true })));
   };
 

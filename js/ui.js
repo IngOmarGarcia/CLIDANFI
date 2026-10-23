@@ -20,7 +20,16 @@
 
   // Siempre devuelve una copia: addDays/startOfDay mutan el objeto que reciben
   // y si no clonáramos aquí, `addDays(ini, 7)` corrompería `ini`.
-  const toDate = (v) => (v instanceof Date ? new Date(v.getTime()) : new Date(v));
+  // Una fecha civil no es un instante UTC: YYYY-MM-DD debe conservar su día
+  // en la zona local. Los timestamps con Z/desfase sí representan instantes.
+  const toDate = (v) => {
+    if (v instanceof Date) return new Date(v.getTime());
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      const [ano, mes, dia] = v.split('-').map(Number);
+      return new Date(ano, mes - 1, dia);
+    }
+    return new Date(v);
+  };
   const startOfDay = (v) => { const d = toDate(v); d.setHours(0, 0, 0, 0); return d; };
   const addDays = (v, n) => { const d = toDate(v); d.setDate(d.getDate() + n); return d; };
   const isoDay = (v) => { const d = startOfDay(v); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
