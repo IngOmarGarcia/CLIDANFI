@@ -15,7 +15,7 @@ context.CalendarioEventos = context.window.CalendarioEventos;
 vm.runInContext(fs.readFileSync('js/views-therapist.js', 'utf8'), context);
 (async () => {
   const vista = await context.window.VistaFisio.agenda({}, { m: '2026-10', d: '2026-10-02' });
-  assert.equal((vista.html.match(/class="agenda-cell /g) || []).length, 42);
+  assert.equal((vista.html.match(/data-agenda-dia="/g) || []).length, 42);
   assert(vista.html.includes('agenda-marker-appointment'));
   const escala = { value: 'mes', selectedOptions: [{ text: 'Mes' }], addEventListener(_, cb) { this.change = cb; } };
   const grafica = { innerHTML: '' };
