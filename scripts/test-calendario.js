@@ -16,18 +16,18 @@ vm.runInContext(fs.readFileSync('js/views-therapist.js', 'utf8'), context);
 (async () => {
   const vista = await context.window.VistaFisio.agenda({}, { m: '2026-10', d: '2026-10-02' });
   assert.equal((vista.html.match(/class="agenda-cell /g) || []).length, 42);
-  assert(vista.html.includes('agenda-cancelada'));
+  assert(vista.html.includes('agenda-marker-appointment'));
   const escala = { value: 'mes', selectedOptions: [{ text: 'Mes' }], addEventListener(_, cb) { this.change = cb; } };
   const grafica = { innerHTML: '' };
   const elements = { '#agenda-mes': { addEventListener() {} }, '#agenda-agregar': null, '#agenda-escala': escala, '#agenda-grafica': grafica };
-  const celda = { dataset: { agendaDia: '2026-10-01' }, addEventListener(_, cb) { this.click = cb; } };
+  const celda = { dataset: { agendaDia: '2026-10-01' }, classList: { toggle() {} }, addEventListener(_, cb) { this.click = cb; } };
   vista.onMount({ querySelector: id => elements[id], querySelectorAll: () => [celda] });
   celda.click({ preventDefault() {} });
   assert(sheetAbierta.title.includes('octubre'));
   assert(sheetAbierta.body.includes('Uno'));
   assert(sheetAbierta.body.includes('Ver cita y acciones'));
   assert(sheetAbierta.body.includes('Cumpleañera'));
-  assert(vista.html.includes('agenda-birthday-mark'));
+  assert(vista.html.includes('agenda-marker-birthday'));
   assert(grafica.innerHTML.includes('3 citas en el periodo'));
   assert(grafica.innerHTML.includes('octubre 2026'));
   for (const tipo of ['dia', 'semana']) {

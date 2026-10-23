@@ -624,12 +624,13 @@
       const d = new Date(primero); d.setDate(d.getDate() + i);
       const dia = isoDay(d), lista = grupos.get(dia) || [];
       const eventos = eventosDelDia(dia, pacientes);
-      return `<a data-agenda-dia="${dia}" class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${E(d.toLocaleDateString('es-MX', { dateStyle: 'full' }))}, ${lista.length} citas" ${dia === hoy ? 'aria-current="date"' : ''}>
+      return `<a data-agenda-dia="${dia}" class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${E(d.toLocaleDateString('es-MX', { dateStyle: 'full' }))}, ${lista.length} citas, ${eventos.cumple.length} cumpleaños, ${eventos.fiestas.length} festivos" ${dia === hoy ? 'aria-current="date"' : ''}>
         <span class="agenda-day ${dia === hoy ? 'agenda-today' : ''}">${d.getDate()}</span>
-        ${eventos.cumple.length ? `<span class="agenda-birthday-mark" title="${E(eventos.cumple.map(p => p.nombre).join(', '))}" aria-label="${eventos.cumple.length} cumpleaños">${eventos.cumple.length} cumple.</span>` : ''}
-        ${eventos.fiestas.map(f => `<span class="agenda-holiday-mark" title="${E(f.nombre)}">✦ <span>${E(f.nombre)}</span></span>`).join('')}
-        ${lista.slice(0, 2).map(c => `<span class="agenda-event agenda-${E(c.estado)}">${E(fmtTime(c.inicia_en))} ${E(c.paciente_nombre)}</span>`).join('')}
-        ${lista.length ? `<span class="agenda-count">${lista.length} cita${lista.length === 1 ? '' : 's'}</span>` : ''}</a>`;
+        <span class="agenda-day-markers">
+          ${lista.length ? `<span class="agenda-marker agenda-marker-appointment" title="${E(lista.map(c => `${fmtTime(c.inicia_en)} ${c.paciente_nombre}`).join('\n'))}"><i aria-hidden="true"></i><span>${lista.length} cita${lista.length === 1 ? '' : 's'}</span></span>` : ''}
+          ${eventos.cumple.length ? `<span class="agenda-marker agenda-marker-birthday" title="${E(eventos.cumple.map(p => p.nombre).join(', '))}"><i aria-hidden="true"></i><span>${eventos.cumple.length} <span class="agenda-marker-full">cumpleaños</span><span class="agenda-marker-short">cumple.</span></span></span>` : ''}
+          ${eventos.fiestas.length ? `<span class="agenda-marker agenda-marker-holiday" title="${E(eventos.fiestas.map(f => f.nombre).join(', '))}"><i aria-hidden="true"></i><span>${eventos.fiestas.length} festivo${eventos.fiestas.length === 1 ? '' : 's'}</span></span>` : ''}
+        </span></a>`;
     }).join('');
     const diarias = grupos.get(seleccionado) || [];
     return { titulo: 'Agenda', html: `<div class="space-y-4 px-4 pt-4 anim-fade-up">
@@ -645,7 +646,8 @@
           <label>Ir al mes <input id="agenda-mes" type="month" value="${mes}" /></label></div>
         <div class="agenda-week">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<span>${d}</span>`).join('')}</div>
         <div class="agenda-grid">${celdas}</div>
-        <p class="agenda-hint">Selecciona un día para ver sus citas y celebraciones. Cumple. indica cumpleaños · ✦ Festivo. Los festivos no bloquean la agenda.</p>
+        <div class="agenda-legend" aria-label="Colores del calendario"><span><i class="agenda-key-appointment" aria-hidden="true"></i>Citas</span><span><i class="agenda-key-birthday" aria-hidden="true"></i>Cumpleaños</span><span><i class="agenda-key-holiday" aria-hidden="true"></i>Festivos</span><span><i class="agenda-key-selected" aria-hidden="true"></i>Día seleccionado</span></div>
+        <p class="agenda-hint">Los indicadores se apilan cuando coinciden varios eventos. Selecciona un día para ver los detalles. Los festivos no bloquean la agenda.</p>
         <p class="agenda-hint">Descansos nacionales recurrentes según la <a href="https://www.profedet.gob.mx/micrositio/index.php/dias-de-descanso" target="_blank" rel="noopener">PROFEDET</a>; no incluye jornadas electorales ni festivos locales.</p>
       </section>
       <section class="agenda-panel"><div class="agenda-toolbar"><h2>${E(fmtDate(seleccionado))} · ${diarias.length} citas</h2>
@@ -661,6 +663,7 @@
         root.querySelectorAll('[data-agenda-dia]').forEach(celda => celda.addEventListener('click', e => {
           e.preventDefault();
           const dia = celda.dataset.agendaDia;
+          root.querySelectorAll('[data-agenda-dia]').forEach(c => c.classList.toggle('agenda-selected', c.dataset.agendaDia === dia));
           const lista = grupos.get(dia) || [];
           openSheet({
             title: new Date(`${dia}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
