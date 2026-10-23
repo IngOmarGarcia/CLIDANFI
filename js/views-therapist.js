@@ -582,7 +582,7 @@
   };
   function celebracionesHTML(dia, pacientes) {
     const { cumple, fiestas } = eventosDelDia(dia, pacientes);
-    return `<div class="agenda-celebrations">${fiestas.map(f => `<p class="agenda-holiday">✦ ${E(f.nombre)} <small>${f.oficial ? 'Descanso oficial' : 'Celebración'}</small></p>`).join('')}${cumple.map(p => `<a class="agenda-birthday" href="#/t/paciente/${E(p.id)}">🎂 ${E(p.nombre)} · cumple ${p.cumple_edad} años</a>`).join('')}</div>`;
+    return `<div class="agenda-celebrations">${fiestas.map(f => `<p class="agenda-holiday">✦ ${E(f.nombre)} <small>${f.oficial ? 'Descanso oficial' : 'Celebración'}</small></p>`).join('')}${cumple.map(p => `<a class="agenda-birthday" href="#/t/paciente/${E(p.id)}">${E(p.nombre)} · cumple ${p.cumple_edad} años</a>`).join('')}</div>`;
   }
   async function cumpleanos(query) {
     const pacientes = await API.pacientesCumpleanos();
@@ -595,7 +595,7 @@
       const c = CalendarioEventos.cumpleEn(p, Number(hoy.slice(0, 4)));
       return c && c.dia >= hoy ? c : CalendarioEventos.cumpleEn(p, Number(hoy.slice(0, 4)) + 1);
     }).filter(Boolean).sort((a, b) => a.dia.localeCompare(b.dia) || a.nombre.localeCompare(b.nombre)).slice(0, 10);
-    const fila = p => `<a class="agenda-birthday birthday-row" href="#/t/paciente/${E(p.id)}"><span>🎂 <strong>${E(p.nombre)}</strong><small>${E(fmtDate(p.dia))}${p.dia === hoy ? ' · ¡Hoy!' : ''}</small></span><strong>${p.cumple_edad} años</strong></a>`;
+    const fila = p => `<a class="agenda-birthday birthday-row" href="#/t/paciente/${E(p.id)}"><span><strong>${E(p.nombre)}</strong><small>${E(fmtDate(p.dia))}${p.dia === hoy ? ' · ¡Hoy!' : ''}</small></span><strong>${p.cumple_edad} años</strong></a>`;
     return { titulo: 'Cumpleaños', html: `<div class="space-y-4 px-4 pt-4"><div class="agenda-toolbar"><a href="#/t/agenda">← Calendario</a><label>Mes <input type="month" id="cumple-mes" value="${mes}" /></label></div>
       <section class="agenda-panel"><h2 class="agenda-total">Cumpleaños de ${E(new Date(`${mes}-01T12:00:00`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>${delMes.length ? delMes.map(fila).join('') : emptyState('gift', 'Sin cumpleaños este mes', 'Registra la fecha de nacimiento en la ficha del paciente.')}</section>
       <section class="agenda-panel"><h2 class="agenda-total">Próximos cumpleaños</h2>${siguientes.length ? siguientes.map(fila).join('') : '<p class="agenda-hint">Aún no hay fechas de nacimiento registradas.</p>'}</section>
@@ -626,7 +626,7 @@
       const eventos = eventosDelDia(dia, pacientes);
       return `<a data-agenda-dia="${dia}" class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${E(d.toLocaleDateString('es-MX', { dateStyle: 'full' }))}, ${lista.length} citas" ${dia === hoy ? 'aria-current="date"' : ''}>
         <span class="agenda-day ${dia === hoy ? 'agenda-today' : ''}">${d.getDate()}</span>
-        ${eventos.cumple.length ? `<span class="agenda-birthday-mark" title="${E(eventos.cumple.map(p => p.nombre).join(', '))}">🎂 ${eventos.cumple.length}</span>` : ''}
+        ${eventos.cumple.length ? `<span class="agenda-birthday-mark" title="${E(eventos.cumple.map(p => p.nombre).join(', '))}" aria-label="${eventos.cumple.length} cumpleaños">${eventos.cumple.length} cumple.</span>` : ''}
         ${eventos.fiestas.map(f => `<span class="agenda-holiday-mark" title="${E(f.nombre)}">✦ <span>${E(f.nombre)}</span></span>`).join('')}
         ${lista.slice(0, 2).map(c => `<span class="agenda-event agenda-${E(c.estado)}">${E(fmtTime(c.inicia_en))} ${E(c.paciente_nombre)}</span>`).join('')}
         ${lista.length ? `<span class="agenda-count">${lista.length} cita${lista.length === 1 ? '' : 's'}</span>` : ''}</a>`;
@@ -637,15 +637,15 @@
         <a class="flex-1 rounded-xl bg-white py-2 text-center font-bold text-brand-700" href="${enlace(mes)}">Calendario</a>
         <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=hoy">Hoy</a>
         <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=proximas">Próximas</a>
-        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=cumpleanos&m=${mes}">🎂 Cumpleaños</a>
+        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=cumpleanos&m=${mes}">Cumpleaños</a>
       </div>
       <section class="agenda-panel" aria-label="Calendario de citas">
         <div class="agenda-toolbar"><h2>${E(inicio.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
-          <div><a href="${enlace(mover(-1))}" aria-label="Mes anterior">‹</a><a href="${enlace(hoy.slice(0, 7), hoy)}">Hoy</a><a href="${enlace(mover(1))}" aria-label="Mes siguiente">›</a></div>
+          <div><a href="${enlace(mover(-1))}" aria-label="Mes anterior">‹</a><a href="${enlace(mover(1))}" aria-label="Mes siguiente">›</a></div>
           <label>Ir al mes <input id="agenda-mes" type="month" value="${mes}" /></label></div>
         <div class="agenda-week">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<span>${d}</span>`).join('')}</div>
         <div class="agenda-grid">${celdas}</div>
-        <p class="agenda-hint">Selecciona un día para ver sus citas y celebraciones. 🎂 Cumpleaños · ✦ Festivo. Los festivos no bloquean la agenda.</p>
+        <p class="agenda-hint">Selecciona un día para ver sus citas y celebraciones. Cumple. indica cumpleaños · ✦ Festivo. Los festivos no bloquean la agenda.</p>
         <p class="agenda-hint">Descansos nacionales recurrentes según la <a href="https://www.profedet.gob.mx/micrositio/index.php/dias-de-descanso" target="_blank" rel="noopener">PROFEDET</a>; no incluye jornadas electorales ni festivos locales.</p>
       </section>
       <section class="agenda-panel"><div class="agenda-toolbar"><h2>${E(fmtDate(seleccionado))} · ${diarias.length} citas</h2>
@@ -834,7 +834,7 @@
           <p id="meta-pacientes" class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
             ${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${list.length} paciente${list.length === 1 ? '' : 's'}
           </p>
-          <a class="agenda-birthday birthday-row" href="#/t/agenda?f=cumpleanos">🎂 Ver cumpleaños de pacientes <span>→</span></a>
+          <a class="agenda-birthday birthday-row" href="#/t/agenda?f=cumpleanos">Ver cumpleaños de pacientes <span>→</span></a>
         </div>
 
         <div id="lista-pacientes" class="space-y-2 px-4 pb-4">
