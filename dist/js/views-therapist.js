@@ -597,9 +597,10 @@
     }).filter(Boolean).sort((a, b) => a.dia.localeCompare(b.dia) || a.nombre.localeCompare(b.nombre)).slice(0, 10);
     const fila = p => `<a class="agenda-birthday birthday-row" href="#/t/paciente/${E(p.id)}"><span><strong>${E(p.nombre)}</strong><small>${E(fmtDate(p.dia))}${p.dia === hoy ? ' · ¡Hoy!' : ''}</small></span><strong>${p.cumple_edad} años</strong></a>`;
     return { titulo: 'Cumpleaños', html: `<div class="space-y-4 px-4 pt-4"><div class="agenda-toolbar"><a href="#/t/agenda">← Calendario</a><label>Mes <input type="month" id="cumple-mes" value="${mes}" /></label></div>
-      <section class="agenda-panel"><h2 class="agenda-total">Cumpleaños de ${E(new Date(`${mes}-01T12:00:00`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>${delMes.length ? delMes.map(fila).join('') : emptyState('gift', 'Sin cumpleaños este mes', 'Registra la fecha de nacimiento en la ficha del paciente.')}</section>
+      <section class="agenda-panel"><div class="agenda-toolbar"><div class="agenda-title"><h2>Cumpleaños de ${E(new Date(`${mes}-01T12:00:00`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
+        <details class="agenda-help"><summary aria-label="Ayuda de cumpleaños">?</summary><div class="agenda-help-content"><p class="agenda-hint">Se calculan a partir de la fecha de nacimiento registrada en la ficha de cada paciente. Puedes agregarla al editar su ficha. Los nacidos el 29 de febrero se muestran el 28 en años no bisiestos.</p></div></details></div></div>${delMes.length ? delMes.map(fila).join('') : emptyState('gift', 'Sin cumpleaños este mes', 'Registra la fecha de nacimiento en la ficha del paciente.')}</section>
       <section class="agenda-panel"><h2 class="agenda-total">Próximos cumpleaños</h2>${siguientes.length ? siguientes.map(fila).join('') : '<p class="agenda-hint">Aún no hay fechas de nacimiento registradas.</p>'}</section>
-      <p class="agenda-hint">${pacientes.length - registrados.length} pacientes sin fecha de nacimiento válida. Puedes agregarla al editar su ficha. Los nacidos el 29 de febrero se muestran el 28 en años no bisiestos.</p></div>`,
+      <p class="agenda-hint">${pacientes.length - registrados.length} pacientes sin fecha de nacimiento válida.</p></div>`,
       onMount(root) { root.querySelector('#cumple-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = `#/t/agenda?f=cumpleanos&m=${e.target.value}`; }); }
     };
   }
@@ -650,8 +651,6 @@
             <div class="agenda-legend" aria-label="Colores del calendario"><span><i class="agenda-key-pending" aria-hidden="true"></i>Citas agendadas</span><span><i class="agenda-key-appointment" aria-hidden="true"></i>Otras citas</span><span><i class="agenda-key-birthday" aria-hidden="true"></i>Cumpleaños</span><span><i class="agenda-key-holiday" aria-hidden="true"></i>Festivos</span><span><i class="agenda-key-selected" aria-hidden="true"></i>Día seleccionado</span></div>
             <p class="agenda-hint">Las citas completadas, canceladas o con falta se agrupan en azul. Los indicadores se apilan cuando coinciden varios eventos. Selecciona un día para ver sus detalles.</p>
             <p class="agenda-hint">Los festivos no bloquean la agenda. Se muestran descansos nacionales recurrentes según la <a href="https://www.profedet.gob.mx/micrositio/index.php/dias-de-descanso" target="_blank" rel="noopener">PROFEDET</a>; no incluye jornadas electorales ni festivos locales.</p>
-            <strong>Estadísticas</strong>
-            <p class="agenda-hint">Conteo por fecha de la cita, incluyendo todos los estados. Año muestra el historial completo; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas comienzan en lunes y cuentan solo los días del mes elegido.</p>
           </div></details></div>
           <div><a href="${enlace(mover(-1))}" aria-label="Mes anterior">‹</a><a href="${enlace(mover(1))}" aria-label="Mes siguiente">›</a></div>
           <label>Ir al mes <input id="agenda-mes" type="month" value="${mes}" /></label></div>
@@ -662,7 +661,10 @@
         ${seleccionado >= hoy ? `<button id="agenda-agregar" class="agenda-add">+ Agendar cita</button>` : ''}</div>
         ${celebracionesHTML(seleccionado, pacientes)}<div class="space-y-2">${diarias.length ? diarias.map(c => citaRow(c)).join('') : emptyState('calendar', 'Sin citas este día', 'Selecciona otra fecha o agenda una cita.')}</div>
       </section>
-      <section class="agenda-panel"><div class="agenda-toolbar"><h2>Estadísticas de citas</h2>
+      <section class="agenda-panel"><div class="agenda-toolbar"><div class="agenda-title"><h2>Estadísticas de citas</h2>
+        <details class="agenda-help"><summary aria-label="Ayuda de estadísticas de citas">?</summary><div class="agenda-help-content">
+          <p class="agenda-hint">Conteo por fecha de la cita, incluyendo todos los estados. Año muestra el historial completo; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas comienzan en lunes y cuentan solo los días del mes elegido.</p>
+        </div></details></div>
         <label>Agrupar por <select id="agenda-escala"><option value="mes">Mes</option><option value="ano">Año</option><option value="semana">Semana</option><option value="dia">Día</option></select></label></div>
         <div id="agenda-grafica" aria-live="polite"></div>
       </section></div>${fab('nueva-cita', 'Agendar cita', 'bg-brand-600')}`,
