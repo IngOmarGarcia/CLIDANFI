@@ -552,15 +552,26 @@
     return rows.map((p) => ({ ...p, proxima_cita: null }));
   };
 
+  const pacientesCumpleanos = async () => {
+    const rows = [];
+    for (let desde = 0; ; desde += 1000) {
+      // Leer la tabla evita depender de que una vista antigua incluya columnas nuevas.
+      const pagina = ok(await sb.from('pacientes').select('*').order('id').range(desde, desde + 999));
+      rows.push(...pagina.map(p => ({ id: p.id, nombre: p.nombre, fecha_nacimiento: p.fecha_nacimiento || null, activo: p.activo })));
+      if (pagina.length < 1000) return rows;
+    }
+  };
+
   const obtenerPaciente = async (id) => {
     const rows = ok(await sb.from('pacientes_ordenados').select('*').eq('id', id).limit(1));
     if (!rows.length) return null;
-    return { ...rows[0], proxima_cita: await _proximaCitaDe(id) };
+    const base = ok(await sb.from('pacientes').select('*').eq('id', id).limit(1));
+    return { ...rows[0], ...(base[0] || {}), proxima_cita: await _proximaCitaDe(id) };
   };
 
   const crearPaciente = async (data) =>
     _escrituraTolerante((fila) => sb.from('pacientes').insert(fila).select().single(),
-      data, ['expediente_pendiente']);
+      data, ['expediente_pendiente', ...(!data.fecha_nacimiento ? ['fecha_nacimiento'] : [])]);
 
   /**
    * Alta exprés: la persona llega sin expediente y solo se le pide nombre y
@@ -588,7 +599,7 @@
 
   const actualizarPaciente = async (id, patch) =>
     _escrituraTolerante((fila) => sb.from('pacientes').update(fila).eq('id', id).select().single(),
-      patch, ['expediente_pendiente']);
+      patch, ['expediente_pendiente', ...(!patch.fecha_nacimiento ? ['fecha_nacimiento'] : [])]);
 
   const eliminarPaciente = async (id) => {
     ok(await sb.from('pacientes').delete().eq('id', id));  // cascada por FK
@@ -1820,7 +1831,7 @@
      ====================================================================== */
   global.API = Object.assign(_proteger({
     setConfig, subirLogo, quitarLogo,
-    listarPacientes, obtenerPaciente, crearPaciente, crearPacienteExpres,
+    pacientesCumpleanos, listarPacientes, obtenerPaciente, crearPaciente, crearPacienteExpres,
     actualizarPaciente, eliminarPaciente,
     historialCitas, citasDeHoy, proximasCitas, citasDeManana, citasDePaciente, proximaCitaDePaciente, obtenerCita,
     crearCita, actualizarCita, cancelarCita, marcarFalta, reactivarCita,

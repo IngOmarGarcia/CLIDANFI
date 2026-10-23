@@ -574,9 +574,38 @@
   /* ======================================================================
      2 · AGENDA
      ====================================================================== */
+  const eventosDelDia = (dia, pacientes) => {
+    const ano = Number(dia.slice(0, 4));
+    const cumple = pacientes.map(p => CalendarioEventos.cumpleEn(p, ano)).filter(p => p && p.dia === dia);
+    const fiestas = CalendarioEventos.festivos(ano).filter(f => f.dia === dia);
+    return { cumple, fiestas };
+  };
+  function celebracionesHTML(dia, pacientes) {
+    const { cumple, fiestas } = eventosDelDia(dia, pacientes);
+    return `<div class="agenda-celebrations">${fiestas.map(f => `<p class="agenda-holiday">✦ ${E(f.nombre)} <small>${f.oficial ? 'Descanso oficial' : 'Celebración'}</small></p>`).join('')}${cumple.map(p => `<a class="agenda-birthday" href="#/t/paciente/${E(p.id)}">🎂 ${E(p.nombre)} · cumple ${p.cumple_edad} años</a>`).join('')}</div>`;
+  }
+  async function cumpleanos(query) {
+    const pacientes = await API.pacientesCumpleanos();
+    const hoy = CalendarioEventos.hoyCentro();
+    const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.m || '') ? query.m : hoy.slice(0, 7);
+    const ano = Number(mes.slice(0, 4));
+    const registrados = pacientes.filter(p => CalendarioEventos.nacimientoValido(p.fecha_nacimiento));
+    const delMes = registrados.map(p => CalendarioEventos.cumpleEn(p, ano)).filter(p => p && p.dia.startsWith(mes)).sort((a, b) => a.dia.localeCompare(b.dia) || a.nombre.localeCompare(b.nombre));
+    const siguientes = registrados.map(p => {
+      const c = CalendarioEventos.cumpleEn(p, Number(hoy.slice(0, 4)));
+      return c && c.dia >= hoy ? c : CalendarioEventos.cumpleEn(p, Number(hoy.slice(0, 4)) + 1);
+    }).filter(Boolean).sort((a, b) => a.dia.localeCompare(b.dia) || a.nombre.localeCompare(b.nombre)).slice(0, 10);
+    const fila = p => `<a class="agenda-birthday birthday-row" href="#/t/paciente/${E(p.id)}"><span>🎂 <strong>${E(p.nombre)}</strong><small>${E(fmtDate(p.dia))}${p.dia === hoy ? ' · ¡Hoy!' : ''}</small></span><strong>${p.cumple_edad} años</strong></a>`;
+    return { titulo: 'Cumpleaños', html: `<div class="space-y-4 px-4 pt-4"><div class="agenda-toolbar"><a href="#/t/agenda">← Calendario</a><label>Mes <input type="month" id="cumple-mes" value="${mes}" /></label></div>
+      <section class="agenda-panel"><h2 class="agenda-total">Cumpleaños de ${E(new Date(`${mes}-01T12:00:00`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>${delMes.length ? delMes.map(fila).join('') : emptyState('gift', 'Sin cumpleaños este mes', 'Registra la fecha de nacimiento en la ficha del paciente.')}</section>
+      <section class="agenda-panel"><h2 class="agenda-total">Próximos cumpleaños</h2>${siguientes.length ? siguientes.map(fila).join('') : '<p class="agenda-hint">Aún no hay fechas de nacimiento registradas.</p>'}</section>
+      <p class="agenda-hint">${pacientes.length - registrados.length} pacientes sin fecha de nacimiento válida. Puedes agregarla al editar su ficha. Los nacidos el 29 de febrero se muestran el 28 en años no bisiestos.</p></div>`,
+      onMount(root) { root.querySelector('#cumple-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = `#/t/agenda?f=cumpleanos&m=${e.target.value}`; }); }
+    };
+  }
   async function calendarioAgenda(query) {
-    const citas = await API.historialCitas();
-    const hoy = isoDay(new Date());
+    const [citas, pacientes] = await Promise.all([API.historialCitas(), API.pacientesCumpleanos()]);
+    const hoy = CalendarioEventos.hoyCentro();
     const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.m || '') ? query.m : hoy.slice(0, 7);
     const inicio = new Date(`${mes}-01T12:00:00`);
     const seleccionado = /^\d{4}-\d{2}-\d{2}$/.test(query.d || '') && query.d.startsWith(mes)
@@ -594,8 +623,11 @@
     const celdas = Array.from({ length: 42 }, (_, i) => {
       const d = new Date(primero); d.setDate(d.getDate() + i);
       const dia = isoDay(d), lista = grupos.get(dia) || [];
+      const eventos = eventosDelDia(dia, pacientes);
       return `<a data-agenda-dia="${dia}" class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${E(d.toLocaleDateString('es-MX', { dateStyle: 'full' }))}, ${lista.length} citas" ${dia === hoy ? 'aria-current="date"' : ''}>
         <span class="agenda-day ${dia === hoy ? 'agenda-today' : ''}">${d.getDate()}</span>
+        ${eventos.cumple.length ? `<span class="agenda-birthday-mark" title="${E(eventos.cumple.map(p => p.nombre).join(', '))}">🎂 ${eventos.cumple.length}</span>` : ''}
+        ${eventos.fiestas.map(f => `<span class="agenda-holiday-mark" title="${E(f.nombre)}">✦ <span>${E(f.nombre)}</span></span>`).join('')}
         ${lista.slice(0, 2).map(c => `<span class="agenda-event agenda-${E(c.estado)}">${E(fmtTime(c.inicia_en))} ${E(c.paciente_nombre)}</span>`).join('')}
         ${lista.length ? `<span class="agenda-count">${lista.length} cita${lista.length === 1 ? '' : 's'}</span>` : ''}</a>`;
     }).join('');
@@ -605,6 +637,7 @@
         <a class="flex-1 rounded-xl bg-white py-2 text-center font-bold text-brand-700" href="${enlace(mes)}">Calendario</a>
         <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=hoy">Hoy</a>
         <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=proximas">Próximas</a>
+        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=cumpleanos&m=${mes}">🎂 Cumpleaños</a>
       </div>
       <section class="agenda-panel" aria-label="Calendario de citas">
         <div class="agenda-toolbar"><h2>${E(inicio.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
@@ -612,11 +645,12 @@
           <label>Ir al mes <input id="agenda-mes" type="month" value="${mes}" /></label></div>
         <div class="agenda-week">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<span>${d}</span>`).join('')}</div>
         <div class="agenda-grid">${celdas}</div>
-        <p class="agenda-hint">Selecciona un día para ver sus citas. En fechas futuras puedes agendar una nueva.</p>
+        <p class="agenda-hint">Selecciona un día para ver sus citas y celebraciones. 🎂 Cumpleaños · ✦ Festivo. Los festivos no bloquean la agenda.</p>
+        <p class="agenda-hint">Descansos nacionales recurrentes según la <a href="https://www.profedet.gob.mx/micrositio/index.php/dias-de-descanso" target="_blank" rel="noopener">PROFEDET</a>; no incluye jornadas electorales ni festivos locales.</p>
       </section>
       <section class="agenda-panel"><div class="agenda-toolbar"><h2>${E(fmtDate(seleccionado))} · ${diarias.length} citas</h2>
         ${seleccionado >= hoy ? `<button id="agenda-agregar" class="agenda-add">+ Agendar cita</button>` : ''}</div>
-        <div class="space-y-2">${diarias.length ? diarias.map(c => citaRow(c)).join('') : emptyState('calendar', 'Sin citas este día', 'Selecciona otra fecha o agenda una cita.')}</div>
+        ${celebracionesHTML(seleccionado, pacientes)}<div class="space-y-2">${diarias.length ? diarias.map(c => citaRow(c)).join('') : emptyState('calendar', 'Sin citas este día', 'Selecciona otra fecha o agenda una cita.')}</div>
       </section>
       <section class="agenda-panel"><div class="agenda-toolbar"><h2>Estadísticas de citas</h2>
         <label>Agrupar por <select id="agenda-escala"><option value="mes">Mes</option><option value="ano">Año</option><option value="semana">Semana</option><option value="dia">Día</option></select></label></div>
@@ -632,7 +666,7 @@
             title: new Date(`${dia}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
             subtitle: `${lista.length} cita${lista.length === 1 ? '' : 's'} · Agenda del día`,
             size: 'tall',
-            body: `<div class="agenda-day-details">${lista.length ? lista.map(c => {
+            body: `${celebracionesHTML(dia, pacientes)}<div class="agenda-day-details">${lista.length ? lista.map(c => {
               const [tono, estado] = ESTADO_CITA[c.estado] || ESTADO_CITA.agendada;
               const fin = new Date(new Date(c.inicia_en).getTime() + (c.duracion_min || 45) * 60000);
               return `<article class="agenda-appointment"><div class="agenda-toolbar"><strong>${E(fmtTime(c.inicia_en))} – ${E(fmtTime(fin))}</strong>${badge(estado, tono)}</div>
@@ -699,6 +733,7 @@
 
   async function agenda(_params, query) {
     const filtro = query.f || 'calendario';
+    if (filtro === 'cumpleanos') return cumpleanos(query);
     if (filtro === 'calendario') return calendarioAgenda(query);
     const citas = filtro === 'hoy' ? await API.citasDeHoy() : await API.proximasCitas({ dias: 21 });
 
@@ -724,7 +759,7 @@
     const html = `
       <div class="space-y-4 px-4 pt-4 anim-fade-up">
         <div class="flex gap-1 rounded-2xl bg-ink-100 p-1">
-          ${tab('calendario', 'Calendario')}${tab('hoy', 'Hoy')}${tab('proximas', 'Próximas')}
+          ${tab('calendario', 'Calendario')}${tab('hoy', 'Hoy')}${tab('proximas', 'Próximas')}${tab('cumpleanos', 'Cumpleaños')}
         </div>
 
         <button data-action="ver-recordatorios"
@@ -799,6 +834,7 @@
           <p id="meta-pacientes" class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
             ${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${list.length} paciente${list.length === 1 ? '' : 's'}
           </p>
+          <a class="agenda-birthday birthday-row" href="#/t/agenda?f=cumpleanos">🎂 Ver cumpleaños de pacientes <span>→</span></a>
         </div>
 
         <div id="lista-pacientes" class="space-y-2 px-4 pb-4">
@@ -2034,6 +2070,9 @@
                 <option value="M" ${p && p.sexo === 'M' ? 'selected' : ''}>Masculino</option>
               </select></div>
           </div>
+          <div><label class="mb-1 block text-[12px] font-bold text-ink-700">Fecha de nacimiento</label>
+            <input id="f-nacimiento" type="date" class="field" max="${CalendarioEventos.hoyCentro()}" value="${E(p && p.fecha_nacimiento || '')}" />
+            <p class="agenda-hint">Se usa para mostrar su cumpleaños y calcular su edad.</p></div>
           <div><label class="mb-1 block text-[12px] font-bold text-ink-700">Teléfono</label>
             <input id="f-tel" type="tel" inputmode="tel" class="field" value="${E(p ? p.telefono : '')}" placeholder="667 000 0000" /></div>
           <div><label class="mb-1 block text-[12px] font-bold text-ink-700">Correo</label>
@@ -2099,6 +2138,10 @@
           if (!nombre) return toast('El nombre es obligatorio', 'error');
           const vence = val(root, '#f-paq-vence');
           const pendiente = root.querySelector('#f-pendiente');
+          const nacimiento = val(root, '#f-nacimiento');
+          if (nacimiento && !CalendarioEventos.nacimientoValido(nacimiento)) return toast('Revisa la fecha de nacimiento; no puede ser futura.', 'error');
+          const hoy = CalendarioEventos.hoyCentro();
+          const edadNacimiento = nacimiento ? Number(hoy.slice(0, 4)) - Number(nacimiento.slice(0, 4)) - (hoy.slice(5) < nacimiento.slice(5) ? 1 : 0) : null;
           // Sin paquete se guardan ceros de forma explícita: si se dejaran los
           // valores que hubiera en los campos ocultos, apagar el interruptor
           // no borraría nada.
@@ -2108,7 +2151,8 @@
             // Quien llena esta ficha entera está completando el expediente;
             // solo sigue pendiente si el propio fisio lo deja marcado.
             expediente_pendiente: pendiente ? pendiente.checked : false,
-            edad: Number(val(root, '#f-edad')) || null,
+            edad: nacimiento ? edadNacimiento : Number(val(root, '#f-edad')) || null,
+            fecha_nacimiento: nacimiento || null,
             sexo: val(root, '#f-sexo'),
             telefono: val(root, '#f-tel'),
             email: val(root, '#f-email'),
@@ -2119,10 +2163,17 @@
             paquete_usadas: conPaquete ? (Number(val(root, '#f-paq-usadas')) || 0) : 0,
             paquete_vence: conPaquete && vence ? new Date(vence + 'T20:00:00').toISOString() : null
           };
-          if (p) { await API.actualizarPaciente(p.id, data); toast('Paciente actualizado'); }
-          else { const nuevo = await API.crearPaciente(data); toast('Paciente registrado'); location.hash = `#/t/paciente/${nuevo.id}`; }
-          closeSheet();
-          App.render();
+          const boton = root.querySelector('#btn-guardar-pac');
+          boton.disabled = true;
+          try {
+            if (p) { await API.actualizarPaciente(p.id, data); toast('Paciente actualizado'); }
+            else { const nuevo = await API.crearPaciente(data); toast('Paciente registrado'); location.hash = `#/t/paciente/${nuevo.id}`; }
+            closeSheet();
+            App.render();
+          } catch (err) {
+            toast(err.message || 'No se pudo guardar el paciente. Intenta de nuevo.', 'error');
+            boton.disabled = false;
+          }
         });
       }
     });

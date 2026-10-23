@@ -8,8 +8,10 @@ const citas = [
   { inicia_en: '2026-09-30T09:00:00', estado: 'agendada', paciente_nombre: 'Tres' }
 ];
 let sheetAbierta;
-const context = { window: {}, UI: { isoDay, escapeHtml: String, fmtTime: () => '09:00', fmtDate: String, badge: (_, tono) => tono, openSheet: sheet => { sheetAbierta = sheet; }, icon: () => '', emptyState: () => 'Sin citas' }, API: { historialCitas: async () => citas }, location: {} };
+const context = { window: {}, UI: { isoDay, escapeHtml: String, fmtTime: () => '09:00', fmtDate: String, badge: (_, tono) => tono, openSheet: sheet => { sheetAbierta = sheet; }, icon: () => '', emptyState: () => 'Sin citas' }, API: { historialCitas: async () => citas, pacientesCumpleanos: async () => [{ id: 'p1', nombre: 'Cumpleañera', fecha_nacimiento: '2000-10-01' }] }, location: {} };
 vm.createContext(context);
+vm.runInContext(fs.readFileSync('js/calendar-events.js', 'utf8'), context);
+context.CalendarioEventos = context.window.CalendarioEventos;
 vm.runInContext(fs.readFileSync('js/views-therapist.js', 'utf8'), context);
 (async () => {
   const vista = await context.window.VistaFisio.agenda({}, { m: '2026-10', d: '2026-10-02' });
@@ -24,6 +26,8 @@ vm.runInContext(fs.readFileSync('js/views-therapist.js', 'utf8'), context);
   assert(sheetAbierta.title.includes('octubre'));
   assert(sheetAbierta.body.includes('Uno'));
   assert(sheetAbierta.body.includes('Ver cita y acciones'));
+  assert(sheetAbierta.body.includes('Cumpleañera'));
+  assert(vista.html.includes('agenda-birthday-mark'));
   assert(grafica.innerHTML.includes('3 citas en el periodo'));
   assert(grafica.innerHTML.includes('octubre 2026'));
   for (const tipo of ['dia', 'semana']) {
@@ -37,5 +41,9 @@ vm.runInContext(fs.readFileSync('js/views-therapist.js', 'utf8'), context);
   assert(!pasado.html.includes('id="agenda-agregar"'));
   const futuro = await context.window.VistaFisio.agenda({}, { m: '2099-01', d: '2099-01-01' });
   assert(futuro.html.includes('id="agenda-agregar"'));
+  assert(futuro.html.includes('Año Nuevo'));
+  const cumple = await context.window.VistaFisio.agenda({}, { f: 'cumpleanos', m: '2026-10' });
+  assert(cumple.html.includes('Cumpleañera'));
+  assert(cumple.html.includes('26 años'));
   console.log('Calendario: 42 días, estados, conteos por año/mes/semana/día y fechas futuras correctos.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

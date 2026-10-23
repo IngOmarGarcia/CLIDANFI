@@ -79,6 +79,7 @@ create table if not exists pacientes (
   telefono        text default '',
   email           text default '',
   edad            int,
+  fecha_nacimiento date,
   sexo            char(1),
   diagnostico     text default '',
   alergias        text default '',
@@ -101,6 +102,7 @@ create table if not exists pacientes (
 -- Para bases creadas antes de la agenda sin registro previo.
 alter table pacientes
   add column if not exists expediente_pendiente boolean not null default false;
+alter table pacientes add column if not exists fecha_nacimiento date;
 
 -- El paquete dejó de ser obligatorio. Se cambia solo el DEFAULT: los pacientes
 -- que ya tienen un paquete contratado conservan su saldo intacto.
