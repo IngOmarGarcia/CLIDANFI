@@ -13,7 +13,9 @@ const path = require('path');
 
 const RAIZ = path.join(__dirname, '..');
 const api = fs.readFileSync(path.join(RAIZ, 'js', 'api.js'), 'utf8');
-const sql = fs.readFileSync(path.join(RAIZ, 'supabase', 'schema.sql'), 'utf8');
+const sql = ['schema.sql', 'valoraciones-respaldo.sql', 'documentos-respaldo.sql']
+  .map(archivo => fs.readFileSync(path.join(RAIZ, 'supabase', archivo), 'utf8'))
+  .join('\n').replace(/\bpublic\./g, '');
 
 let fallos = 0;
 const ok = (c, m) => { console.log(`${c ? '✓' : '✗'} ${m}`); if (!c) fallos++; };

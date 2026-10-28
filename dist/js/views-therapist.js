@@ -26,7 +26,7 @@
    * la app para que quede alineado al marco también en escritorio.
    */
   const fab = (accion, aria, color = 'bg-brand-600') => `
-    <div class="pointer-events-none fixed bottom-24 left-1/2 z-20 flex w-full max-w-[480px] -translate-x-1/2 justify-end px-4">
+    <div class="pointer-events-none fixed bottom-24 left-1/2 z-20 flex w-full max-w-[480px] lg:max-w-[1600px] lg:pr-8 -translate-x-1/2 justify-end px-4">
       <button data-action="${accion}" aria-label="${E(aria)}"
         class="pointer-events-auto grid h-14 w-14 place-items-center rounded-full ${color} text-white shadow-lift active:scale-95">
         ${icon('plus', 'h-6 w-6', 2.4)}
@@ -67,7 +67,7 @@
    * dibuja: la barra ocupa el borde inferior ella sola y nada la tapa.
    */
   const barraGuardar = (accion, datos, texto) => `
-    <div class="fixed bottom-0 left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,.25)] backdrop-blur nav-safe">
+    <div class="fixed bottom-0 left-1/2 z-40 w-full max-w-[480px] lg:max-w-[1600px] -translate-x-1/2 border-t border-ink-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,.25)] backdrop-blur nav-safe">
       <p id="indicador-pendiente" class="mb-1.5 hidden items-center justify-center gap-1.5 text-[11.5px] font-bold text-amber-700">
         ${icon('alert', 'h-3.5 w-3.5')} Tienes cambios sin guardar
       </p>
@@ -366,6 +366,25 @@
       </button>`;
   }
 
+  /* Misma cita que citaRow, en fila de tabla para escritorio. El
+     `data-action="cita-menu"` es idéntico a propósito: el delegador de
+     eventos no distingue entre tarjeta y fila, así que no hay que duplicar
+     ninguna lógica de apertura. */
+  function citaFila(c) {
+    const [tone, label] = ESTADO_CITA[c.estado] || ESTADO_CITA.agendada;
+    return `
+      <tr class="border-b border-ink-100 hover:bg-ink-50">
+        <td class="py-2.5 pr-3 font-bold tabular-nums">${E(fmtTime(c.inicia_en))}</td>
+        <td class="py-2.5 pr-3">${E(c.paciente_nombre)}</td>
+        <td class="py-2.5 pr-3 text-ink-500">${E(c.motivo)} · ${c.duracion_min} min</td>
+        <td class="py-2.5 pr-3">${badge(label, tone)}</td>
+        <td class="py-2.5 text-right">
+          <button data-action="cita-menu" data-id="${c.id}"
+            class="rounded-lg px-2.5 py-1.5 text-[12px] font-bold text-brand-700 hover:bg-brand-50">Abrir</button>
+        </td>
+      </tr>`;
+  }
+
   /** Fila de la lista de pacientes. */
   function pacienteRow(p) {
     const restantes = p.paquete_restantes;
@@ -440,10 +459,10 @@
     // NO existe en la base. No se rompe nada, pero hay que decirlo con claridad.
 
     const html = `
-      <div class="space-y-4 px-4 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pt-4 anim-fade-up md:grid md:grid-cols-2 md:items-start md:gap-4 md:space-y-0 xl:grid-cols-3">
 
         ${falta ? `
-          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4 md:col-span-2 xl:col-span-3">
             <p class="flex items-center gap-2 text-[13px] font-extrabold text-amber-900">
               ${icon('alert', 'h-4 w-4 shrink-0')} Base de datos desactualizada
             </p>
@@ -458,7 +477,7 @@
 
         ${r.solicitudes_nuevas ? `
           <button data-action="ver-solicitudes"
-            class="flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-3.5 text-left shadow-card active:scale-[.99]">
+            class="flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-3.5 text-left shadow-card active:scale-[.99] md:col-span-2 xl:col-span-3">
             <span class="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-600 text-white">
               ${icon('bell', 'h-5 w-5')}
               <span class="absolute -right-1 -top-1 grid h-5 min-w-[1.25rem] place-items-center rounded-full bg-ink-900 px-1 text-[10px] font-extrabold text-white">${r.solicitudes_nuevas}</span>
@@ -496,7 +515,7 @@
           <p class="mt-2 text-center text-[10.5px] font-medium text-ink-400">
             ${E(fmtDate(ingresos.inicio))} – ${E(fmtDate(ingresos.fin))} · Ticket prom. ${E(fmtMoney(r.ticket_promedio))}
           </p>
-        `)}
+        `, 'md:col-span-2 xl:col-span-3')}
 
         <!-- KPIs -->
         <div class="flex gap-2.5">
@@ -555,8 +574,179 @@
   /* ======================================================================
      2 · AGENDA
      ====================================================================== */
+  const eventosDelDia = (dia, pacientes) => {
+    const ano = Number(dia.slice(0, 4));
+    const cumple = pacientes.map(p => CalendarioEventos.cumpleEn(p, ano)).filter(p => p && p.dia === dia);
+    const fiestas = CalendarioEventos.festivos(ano).filter(f => f.dia === dia);
+    return { cumple, fiestas };
+  };
+  function celebracionesHTML(dia, pacientes) {
+    const { cumple, fiestas } = eventosDelDia(dia, pacientes);
+    return `<div class="agenda-celebrations">${fiestas.map(f => `<p class="agenda-holiday">✦ ${E(f.nombre)} <small>${f.oficial ? 'Descanso oficial' : 'Celebración'}</small></p>`).join('')}${cumple.map(p => `<a class="agenda-birthday" href="#/t/paciente/${E(p.id)}">${E(p.nombre)} · cumple ${p.cumple_edad} años</a>`).join('')}</div>`;
+  }
+  async function cumpleanos(query) {
+    const pacientes = await API.pacientesCumpleanos();
+    const hoy = CalendarioEventos.hoyCentro();
+    const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.m || '') ? query.m : hoy.slice(0, 7);
+    const ano = Number(mes.slice(0, 4));
+    const registrados = pacientes.filter(p => CalendarioEventos.nacimientoValido(p.fecha_nacimiento));
+    const delMes = registrados.map(p => CalendarioEventos.cumpleEn(p, ano)).filter(p => p && p.dia.startsWith(mes)).sort((a, b) => a.dia.localeCompare(b.dia) || a.nombre.localeCompare(b.nombre));
+    const siguientes = registrados.map(p => {
+      const c = CalendarioEventos.cumpleEn(p, Number(hoy.slice(0, 4)));
+      return c && c.dia >= hoy ? c : CalendarioEventos.cumpleEn(p, Number(hoy.slice(0, 4)) + 1);
+    }).filter(Boolean).sort((a, b) => a.dia.localeCompare(b.dia) || a.nombre.localeCompare(b.nombre)).slice(0, 10);
+    const fila = p => `<a class="agenda-birthday birthday-row" href="#/t/paciente/${E(p.id)}"><span><strong>${E(p.nombre)}</strong><small>${E(fmtDate(p.dia))}${p.dia === hoy ? ' · ¡Hoy!' : ''}</small></span><strong>${p.cumple_edad} años</strong></a>`;
+    return { titulo: 'Cumpleaños', html: `<div class="space-y-4 px-4 pt-4"><div class="agenda-toolbar"><a href="#/t/agenda">← Calendario</a><label>Mes <input type="month" id="cumple-mes" value="${mes}" /></label></div>
+      <section class="agenda-panel"><div class="agenda-toolbar"><div class="agenda-title"><h2>Cumpleaños de ${E(new Date(`${mes}-01T12:00:00`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
+        <details class="agenda-help"><summary aria-label="Ayuda de cumpleaños">?</summary><div class="agenda-help-content"><p class="agenda-hint">Se calculan a partir de la fecha de nacimiento registrada en la ficha de cada paciente. Puedes agregarla al editar su ficha. Los nacidos el 29 de febrero se muestran el 28 en años no bisiestos.</p></div></details></div></div>${delMes.length ? delMes.map(fila).join('') : emptyState('gift', 'Sin cumpleaños este mes', 'Registra la fecha de nacimiento en la ficha del paciente.')}</section>
+      <section class="agenda-panel"><h2 class="agenda-total">Próximos cumpleaños</h2>${siguientes.length ? siguientes.map(fila).join('') : '<p class="agenda-hint">Aún no hay fechas de nacimiento registradas.</p>'}</section>
+      <p class="agenda-hint">${pacientes.length - registrados.length} pacientes sin fecha de nacimiento válida.</p></div>`,
+      onMount(root) { root.querySelector('#cumple-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = `#/t/agenda?f=cumpleanos&m=${e.target.value}`; }); }
+    };
+  }
+  async function calendarioAgenda(query) {
+    const [citas, pacientes] = await Promise.all([API.historialCitas(), API.pacientesCumpleanos()]);
+    const hoy = CalendarioEventos.hoyCentro();
+    const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.m || '') ? query.m : hoy.slice(0, 7);
+    const inicio = new Date(`${mes}-01T12:00:00`);
+    const seleccionado = /^\d{4}-\d{2}-\d{2}$/.test(query.d || '') && query.d.startsWith(mes)
+      ? query.d : hoy.startsWith(mes) ? hoy : `${mes}-01`;
+    const grupos = new Map();
+    citas.forEach(c => {
+      const dia = isoDay(c.inicia_en);
+      if (!grupos.has(dia)) grupos.set(dia, []);
+      grupos.get(dia).push(c);
+    });
+    const enlace = (m, d) => `#/t/agenda?f=calendario&m=${m}${d ? `&d=${d}` : ''}`;
+    const mover = n => { const d = new Date(inicio); d.setMonth(d.getMonth() + n); return isoDay(d).slice(0, 7); };
+    const primero = new Date(inicio);
+    primero.setDate(1 - (inicio.getDay() + 6) % 7);
+    const celdas = Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(primero); d.setDate(d.getDate() + i);
+      const dia = isoDay(d), lista = grupos.get(dia) || [];
+      const pendientes = lista.filter(c => c.estado === 'agendada');
+      const otras = lista.filter(c => c.estado !== 'agendada');
+      const eventos = eventosDelDia(dia, pacientes);
+      return `<a data-agenda-dia="${dia}" class="agenda-cell ${dia.startsWith(mes) ? '' : 'agenda-muted'} ${dia === seleccionado ? 'agenda-selected' : ''}" href="${enlace(isoDay(d).slice(0, 7), dia)}" aria-label="${E(d.toLocaleDateString('es-MX', { dateStyle: 'full' }))}, ${lista.length} citas, ${eventos.cumple.length} cumpleaños, ${eventos.fiestas.length} festivos" ${dia === hoy ? 'aria-current="date"' : ''}>
+        <span class="agenda-day ${dia === hoy ? 'agenda-today' : ''}">${d.getDate()}</span>
+        <span class="agenda-day-markers">
+          ${pendientes.length ? `<span class="agenda-marker agenda-marker-pending" title="${E(pendientes.map(c => `${fmtTime(c.inicia_en)} ${c.paciente_nombre}`).join('\n'))}"><i aria-hidden="true"></i><span>${pendientes.length} agendada${pendientes.length === 1 ? '' : 's'}</span></span>` : ''}
+          ${otras.length ? `<span class="agenda-marker agenda-marker-appointment" title="${E(otras.map(c => `${fmtTime(c.inicia_en)} ${c.paciente_nombre}`).join('\n'))}"><i aria-hidden="true"></i><span>${otras.length} <span class="agenda-marker-full">otras citas</span><span class="agenda-marker-short">citas</span></span></span>` : ''}
+          ${eventos.cumple.length ? `<span class="agenda-marker agenda-marker-birthday" title="${E(eventos.cumple.map(p => p.nombre).join(', '))}"><i aria-hidden="true"></i><span>${eventos.cumple.length} <span class="agenda-marker-full">cumpleaños</span><span class="agenda-marker-short">cumple.</span></span></span>` : ''}
+          ${eventos.fiestas.length ? `<span class="agenda-marker agenda-marker-holiday" title="${E(eventos.fiestas.map(f => f.nombre).join(', '))}"><i aria-hidden="true"></i><span>${eventos.fiestas.length} festivo${eventos.fiestas.length === 1 ? '' : 's'}</span></span>` : ''}
+        </span></a>`;
+    }).join('');
+    const diarias = grupos.get(seleccionado) || [];
+    return { titulo: 'Agenda', html: `<div class="space-y-4 px-4 pt-4 anim-fade-up">
+      <div class="flex gap-1 rounded-2xl bg-ink-100 p-1">
+        <a class="flex-1 rounded-xl bg-white py-2 text-center font-bold text-brand-700" href="${enlace(mes)}">Calendario</a>
+        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=hoy">Hoy</a>
+        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=proximas">Próximas</a>
+        <a class="flex-1 py-2 text-center font-bold" href="#/t/agenda?f=cumpleanos&m=${mes}">Cumpleaños</a>
+      </div>
+      <section class="agenda-panel" aria-label="Calendario de citas">
+        <div class="agenda-toolbar"><div class="agenda-title"><h2>${E(inicio.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}</h2>
+          <details class="agenda-help"><summary aria-label="Ayuda del calendario">?</summary><div class="agenda-help-content">
+            <strong>Colores del calendario</strong>
+            <div class="agenda-legend" aria-label="Colores del calendario"><span><i class="agenda-key-pending" aria-hidden="true"></i>Citas agendadas</span><span><i class="agenda-key-appointment" aria-hidden="true"></i>Otras citas</span><span><i class="agenda-key-birthday" aria-hidden="true"></i>Cumpleaños</span><span><i class="agenda-key-holiday" aria-hidden="true"></i>Festivos</span><span><i class="agenda-key-selected" aria-hidden="true"></i>Día seleccionado</span></div>
+            <p class="agenda-hint">Las citas completadas, canceladas o con falta se agrupan en azul. Los indicadores se apilan cuando coinciden varios eventos. Selecciona un día para ver sus detalles.</p>
+            <p class="agenda-hint">Los festivos no bloquean la agenda. Se muestran descansos nacionales recurrentes según la <a href="https://www.profedet.gob.mx/micrositio/index.php/dias-de-descanso" target="_blank" rel="noopener">PROFEDET</a>; no incluye jornadas electorales ni festivos locales.</p>
+          </div></details></div>
+          <div><a href="${enlace(mover(-1))}" aria-label="Mes anterior">‹</a><a href="${enlace(mover(1))}" aria-label="Mes siguiente">›</a></div>
+          <label>Ir al mes <input id="agenda-mes" type="month" value="${mes}" /></label></div>
+        <div class="agenda-week">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<span>${d}</span>`).join('')}</div>
+        <div class="agenda-grid">${celdas}</div>
+      </section>
+      <section class="agenda-panel"><div class="agenda-toolbar"><h2>${E(fmtDate(seleccionado))} · ${diarias.length} citas</h2>
+        ${seleccionado >= hoy ? `<button id="agenda-agregar" class="agenda-add">+ Agendar cita</button>` : ''}</div>
+        ${celebracionesHTML(seleccionado, pacientes)}<div class="space-y-2">${diarias.length ? diarias.map(c => citaRow(c)).join('') : emptyState('calendar', 'Sin citas este día', 'Selecciona otra fecha o agenda una cita.')}</div>
+      </section>
+      <section class="agenda-panel"><div class="agenda-toolbar"><div class="agenda-title"><h2>Estadísticas de citas</h2>
+        <details class="agenda-help"><summary aria-label="Ayuda de estadísticas de citas">?</summary><div class="agenda-help-content">
+          <p class="agenda-hint">Conteo por fecha de la cita, incluyendo todos los estados. Año muestra el historial completo; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas comienzan en lunes y cuentan solo los días del mes elegido.</p>
+        </div></details></div>
+        <label>Agrupar por <select id="agenda-escala"><option value="mes">Mes</option><option value="ano">Año</option><option value="semana">Semana</option><option value="dia">Día</option></select></label></div>
+        <div id="agenda-grafica" aria-live="polite"></div>
+      </section></div>${fab('nueva-cita', 'Agendar cita', 'bg-brand-600')}`,
+      onMount(root) {
+        root.querySelectorAll('[data-agenda-dia]').forEach(celda => celda.addEventListener('click', e => {
+          e.preventDefault();
+          const dia = celda.dataset.agendaDia;
+          root.querySelectorAll('[data-agenda-dia]').forEach(c => c.classList.toggle('agenda-selected', c.dataset.agendaDia === dia));
+          const lista = grupos.get(dia) || [];
+          openSheet({
+            title: new Date(`${dia}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+            subtitle: `${lista.length} cita${lista.length === 1 ? '' : 's'} · Agenda del día`,
+            size: 'tall',
+            body: `${celebracionesHTML(dia, pacientes)}<div class="agenda-day-details">${lista.length ? lista.map(c => {
+              const [tono, estado] = ESTADO_CITA[c.estado] || ESTADO_CITA.agendada;
+              const fin = new Date(new Date(c.inicia_en).getTime() + (c.duracion_min || 45) * 60000);
+              return `<article class="agenda-appointment"><div class="agenda-toolbar"><strong>${E(fmtTime(c.inicia_en))} – ${E(fmtTime(fin))}</strong>${badge(estado, tono)}</div>
+                <h3>${E(c.paciente_nombre)}</h3><p>${E(c.motivo || 'Sin motivo registrado')} · ${E(String(c.duracion_min || 45))} min</p>
+                ${c.precio != null ? `<p>Precio: ${E(fmtMoney(c.precio))}</p>` : ''}
+                ${c.notas ? `<p class="agenda-notes">${E(c.notas)}</p>` : ''}
+                <button class="agenda-detail-action" data-abrir-cita="${E(c.id)}">Ver cita y acciones</button></article>`;
+            }).join('') : emptyState('calendar', 'Sin citas este día', 'Este día no tiene citas registradas.')}</div>`,
+            footer: dia >= hoy ? '<button id="agenda-dia-agregar" class="agenda-add" style="width:100%">+ Agendar cita este día</button>' : '',
+            onMount(sheet) {
+              sheet.querySelector('#agenda-dia-agregar')?.addEventListener('click', () => sheetCita(null, null, dia));
+              sheet.querySelectorAll('[data-abrir-cita]').forEach(b => b.addEventListener('click', () => sheetMenuCita(b.dataset.abrirCita)));
+            }
+          });
+        }));
+        root.querySelector('#agenda-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = enlace(e.target.value); });
+        root.querySelector('#agenda-agregar')?.addEventListener('click', () => sheetCita(null, null, seleccionado));
+        const escala = root.querySelector('#agenda-escala');
+        const pintar = () => {
+          const tipo = escala.value, buckets = new Map();
+          const clave = fecha => {
+            if (tipo === 'ano') return fecha.slice(0, 4);
+            if (tipo === 'mes') return fecha.slice(0, 7);
+            if (tipo === 'dia') return fecha;
+            const d = new Date(`${fecha}T12:00:00`); d.setDate(d.getDate() - (d.getDay() + 6) % 7);
+            return isoDay(d);
+          };
+          if (tipo === 'ano') {
+            const anos = citas.map(c => Number(isoDay(c.inicia_en).slice(0, 4)));
+            const fin = Math.max(Number(mes.slice(0, 4)), ...anos);
+            const ini = Math.min(Number(mes.slice(0, 4)), ...anos);
+            for (let a = ini; a <= fin; a++) buckets.set(String(a), 0);
+          } else if (tipo === 'mes') {
+            for (let m = 1; m <= 12; m++) buckets.set(`${mes.slice(0, 4)}-${String(m).padStart(2, '0')}`, 0);
+          } else {
+            const d = new Date(inicio);
+            while (isoDay(d).startsWith(mes)) { buckets.set(clave(isoDay(d)), 0); d.setDate(d.getDate() + 1); }
+          }
+          citas.forEach(c => {
+            const fecha = isoDay(c.inicia_en);
+            if (tipo === 'mes' && !fecha.startsWith(mes.slice(0, 4))) return;
+            if ((tipo === 'dia' || tipo === 'semana') && !fecha.startsWith(mes)) return;
+            const k = clave(fecha); buckets.set(k, (buckets.get(k) || 0) + 1);
+          });
+          const max = Math.max(1, ...buckets.values());
+          const etiqueta = k => {
+            if (tipo === 'ano') return k;
+            const d = new Date(`${k}${tipo === 'mes' ? '-01' : ''}T12:00:00`);
+            if (tipo === 'mes') return d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).replace(' de ', ' ');
+            if (tipo === 'dia') return `${String(d.getDate()).padStart(2, '0')} ${d.toLocaleDateString('es-MX', { month: 'long' })}`;
+            const fin = new Date(d); fin.setDate(fin.getDate() + 6);
+            const desde = k < `${mes}-01` ? new Date(inicio) : d;
+            const ultimo = new Date(inicio); ultimo.setMonth(ultimo.getMonth() + 1, 0);
+            const hasta = fin > ultimo ? ultimo : fin;
+            return `${String(desde.getDate()).padStart(2, '0')}–${String(hasta.getDate()).padStart(2, '0')} ${hasta.toLocaleDateString('es-MX', { month: 'long' })}`;
+          };
+          const total = [...buckets.values()].reduce((a, b) => a + b, 0);
+          root.querySelector('#agenda-grafica').innerHTML = `<p class="agenda-total">${total} citas en el periodo</p><div class="agenda-bars" role="list" aria-label="Cantidad de citas por ${E(escala.selectedOptions[0].text)}">${[...buckets].map(([k, n]) => `<div class="agenda-bar-row" role="listitem"><span>${E(etiqueta(k))}</span><div class="agenda-track"><div class="agenda-bar" style="width:${n / max * 100}%"></div></div><strong>${n}</strong></div>`).join('')}</div>${total ? '' : '<p class="agenda-hint">No hay citas registradas en este periodo.</p>'}`;
+        };
+        escala.addEventListener('change', pintar); pintar();
+      }
+    };
+  }
+
   async function agenda(_params, query) {
-    const filtro = query.f || 'proximas';
+    const filtro = query.f || 'calendario';
+    if (filtro === 'cumpleanos') return cumpleanos(query);
+    if (filtro === 'calendario') return calendarioAgenda(query);
     const citas = filtro === 'hoy' ? await API.citasDeHoy() : await API.proximasCitas({ dias: 21 });
 
     // Agrupa por día
@@ -581,7 +771,7 @@
     const html = `
       <div class="space-y-4 px-4 pt-4 anim-fade-up">
         <div class="flex gap-1 rounded-2xl bg-ink-100 p-1">
-          ${tab('hoy', 'Hoy')}${tab('proximas', 'Próximas')}
+          ${tab('calendario', 'Calendario')}${tab('hoy', 'Hoy')}${tab('proximas', 'Próximas')}${tab('cumpleanos', 'Cumpleaños')}
         </div>
 
         <button data-action="ver-recordatorios"
@@ -607,7 +797,23 @@
                   <span class="text-[11px] font-semibold text-ink-400">${E(fmtDate(dia))}</span>
                   <span class="ml-auto rounded-full bg-ink-100 px-2 py-0.5 text-[10.5px] font-bold text-ink-600">${list.length} cita${list.length === 1 ? '' : 's'}</span>
                 </div>
-                <div class="space-y-2">${list.map((c) => citaRow(c)).join('')}</div>
+                <div class="space-y-2 lg:hidden">${list.map((c) => citaRow(c)).join('')}</div>
+                <div class="hidden lg:block">
+                  <table class="w-full border-collapse text-[13px]">
+                    <thead>
+                      <tr class="border-b border-ink-200 text-left text-[11px] uppercase tracking-wide text-ink-500">
+                        <th class="py-2 pr-3 font-bold">Hora</th>
+                        <th class="py-2 pr-3 font-bold">Paciente</th>
+                        <th class="py-2 pr-3 font-bold">Servicio</th>
+                        <th class="py-2 pr-3 font-bold">Estado</th>
+                        <th class="py-2 font-bold"><span class="sr-only">Acciones</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${list.map(citaFila).join('')}
+                    </tbody>
+                  </table>
+                </div>
               </div>`).join('')}
       </div>
 
@@ -637,12 +843,13 @@
               class="absolute right-3 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full bg-ink-200 text-ink-600">
               ${icon('x', 'h-3.5 w-3.5')}</button>` : ''}
           </div>
-          <p class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
+          <p id="meta-pacientes" class="mt-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-ink-400">
             ${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${list.length} paciente${list.length === 1 ? '' : 's'}
           </p>
+          <a class="agenda-birthday birthday-row" href="#/t/agenda?f=cumpleanos">Ver cumpleaños de pacientes <span>→</span></a>
         </div>
 
-        <div class="space-y-2 px-4 pb-4">
+        <div id="lista-pacientes" class="space-y-2 px-4 pb-4">
           ${list.length
             ? list.map(pacienteRow).join('')
             : emptyState('users', _busqueda ? 'Sin resultados' : 'Aún no hay pacientes',
@@ -661,13 +868,15 @@
         clearTimeout(t);
         t = setTimeout(async () => {
           const nuevos = await API.listarPacientes({ q: _busqueda });
-          const cont = root.querySelector('.space-y-2.px-4.pb-4');
+          // Por id, no por clases: las clases cambian con el layout
+          // responsivo y un selector de clases se rompería en silencio.
+          const cont = root.querySelector('#lista-pacientes');
           if (cont) {
             cont.innerHTML = nuevos.length
               ? nuevos.map(pacienteRow).join('')
               : emptyState('users', 'Sin resultados', `No encontramos pacientes que coincidan con "${_busqueda}".`);
           }
-          const meta = root.querySelector('p.mt-2');
+          const meta = root.querySelector('#meta-pacientes');
           if (meta) meta.innerHTML = `${icon('filter', 'h-3.5 w-3.5')} Ordenados por última asistencia · ${nuevos.length} paciente${nuevos.length === 1 ? '' : 's'}`;
         }, 180);
       });
@@ -700,13 +909,24 @@
       tab === 'valoracion' ? await tabValoracion(p) :
       tab === 'historial'  ? await tabHistorial(p)  :
       tab === 'rutinas'    ? await tabRutinas(p)    :
-                             await tabResumen(p, { usadas, total, pct });
+                             await tabResumen(p);
+
+    /* Corrección de rejilla (xl): la tarjeta de resumen (paquete de sesiones)
+       solo existe en la pestaña «Resumen» —es la única con algo que fijar en
+       la columna angosta—. En las otras tres pestañas no hay tarjeta que
+       extraer, así que esta variable queda vacía y el envoltorio de abajo
+       ocupa las dos columnas él solo (`xl:col-span-2`), tal como se veía
+       antes de este ajuste. Así la rejilla nunca reparte los hermanos de una
+       pestaña fila a fila entre las dos columnas. */
+    const tarjetaResumen = tab === 'resumen' ? tarjetaResumenPaquete(p, { usadas, total, pct }) : '';
 
     /* Alta exprés sin historia clínica: el aviso va en TODAS las pestañas, no
        solo en el resumen, porque el hueco que deja se nota justo cuando se
-       abre la valoración o se busca un diagnóstico que nadie capturó. */
+       abre la valoración o se busca un diagnóstico que nadie capturó.
+       `xl:col-span-2`: si no, al ser el primer hijo de la rejilla le robaría
+       el sitio a la tarjeta de resumen en la columna angosta. */
     const avisoPendiente = p.expediente_pendiente ? `
-      <div class="rounded-2xl border border-amber-300 bg-amber-50 p-3.5">
+      <div class="rounded-2xl border border-amber-300 bg-amber-50 p-3.5 xl:col-span-2">
         <p class="flex items-center gap-2 text-[13px] font-extrabold text-amber-900">
           ${icon('alert', 'h-4 w-4 shrink-0')} Historial clínico pendiente
         </p>
@@ -770,7 +990,7 @@
           <div class="scroll-x no-scrollbar pb-1">${tabs}</div>
         </div>
 
-        <div class="mt-3 space-y-4 px-4 pb-6">${avisoPendiente}${contenido}</div>
+        <div class="mt-3 space-y-4 px-4 pb-6 xl:grid xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start xl:gap-5 xl:space-y-0">${avisoPendiente}${tarjetaResumen}<div class="min-w-0${tab === 'resumen' ? '' : ' xl:col-span-2'}">${contenido}</div></div>
       </div>`;
 
     /* La pestaña de historial trae un selector de archivos, y un `<input
@@ -785,16 +1005,17 @@
   }
 
   /* --------------------------------------------------- Tab · Resumen ----- */
-  async function tabResumen(p, { usadas, total, pct }) {
-    const [asistencias, pagos, citas, cumpl] = await Promise.all([
-      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
-      API.cumplimientoDePaciente(p.id)
-    ]);
-    const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
-    const prox = p.proxima_cita;
 
-    return `
-      ${total > 0 ? card(`
+  /**
+   * Tarjeta de «Paquete de sesiones». Se extrajo de `tabResumen()` porque,
+   * en la rejilla de la ficha (≥1280px), es la única pieza que se fija en
+   * la columna angosta (`xl:sticky xl:top-4`); el resto de la pestaña
+   * Resumen queda en el envoltorio de la columna ancha. Solo se llama
+   * cuando `tab === 'resumen'`, así que en móvil y en las otras pestañas
+   * no cambia nada.
+   */
+  const tarjetaResumenPaquete = (p, { usadas, total, pct }) =>
+    total > 0 ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
           ${badge(p.paquete_restantes === 0 ? 'Agotado' : `${p.paquete_restantes} restantes`, p.paquete_restantes === 0 ? 'rose' : p.paquete_restantes <= 2 ? 'amber' : 'green')}
@@ -807,7 +1028,7 @@
           <span>${usadas} de ${total} usadas</span>
           <span>${p.paquete_vence ? `Vence ${E(fmtDate(p.paquete_vence))}` : 'Sin vigencia'}</span>
         </div>
-      `) : card(`
+      `, 'xl:sticky xl:top-4') : card(`
         <!-- Sin paquete no se pinta una barra al 0 %: parecería un paquete
              agotado, que es lo contrario de «paga por sesión». -->
         <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
@@ -816,8 +1037,17 @@
           class="mt-2 rounded-xl bg-ink-100 px-3 py-1.5 text-[12px] font-bold text-ink-600 active:scale-95">
           Contratar un paquete
         </button>
-      `)}
+      `, 'xl:sticky xl:top-4');
 
+  async function tabResumen(p) {
+    const [asistencias, pagos, citas, cumpl] = await Promise.all([
+      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
+      API.cumplimientoDePaciente(p.id)
+    ]);
+    const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
+    const prox = p.proxima_cita;
+
+    return `
       ${(cumpl.faltas > 0 || cumpl.canceladas > 0) ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Control de asistencia</p>
@@ -916,6 +1146,14 @@
   /* ------------------------------------------------ Tab · Valoración ----- */
   async function tabValoracion(p) {
     const v = await API.valoracionDePaciente(p.id);
+    const versiones = await API.historialValoraciones(p.id);
+    const historial = versiones === null
+      ? '<p class="text-[12px] text-amber-700">Conservación de versiones pendiente de activar en Supabase.</p>'
+      : `<div class="space-y-2"><h3 class="font-bold">Historial de guardados (${versiones.length})</h3>${versiones.map(h => `
+          <details class="rounded-xl border border-ink-200 bg-white p-3">
+            <summary class="cursor-pointer text-[12px] font-bold">${E(new Date(h.creado_en).toLocaleString('es-MX'))} · ${h.drive_archivo_id ? 'Respaldado en Drive' : 'Respaldo en Drive pendiente'}</summary>
+            <pre class="mt-2 whitespace-pre-wrap break-words text-[12px]">${E(JSON.stringify(h.contenido.datos, null, 2))}</pre>
+          </details>`).join('')}</div>`;
 
     if (!v) {
       return `
@@ -959,6 +1197,7 @@
         </button>
       </div>
 
+      ${historial}
       ${activas.map((sec) => {
         const datos = todosLosDatos[sec.key] || {};
         const filas = sec.campos.map((c) => {
@@ -1073,8 +1312,9 @@
                 ${card(`
                   <div class="flex items-start justify-between gap-2">
                     <div>
-                      <p class="text-[12.5px] font-extrabold capitalize text-ink-900">${E(relDay(n.creado_en))}</p>
-                      <p class="text-[11px] font-medium text-ink-400">${E(fmtDateTime(n.creado_en))}</p>
+                      <p class="text-[12.5px] font-extrabold capitalize text-ink-900">${E(relDay(n.fecha_nota || n.creado_en))}</p>
+                      <p class="text-[11px] font-medium text-ink-400">${E(fmtDateTime(n.fecha_nota || n.creado_en))}</p>
+                      <button data-action="fecha-nota" data-id="${E(n.id)}" data-fecha="${E(n.fecha_nota || n.creado_en)}" class="min-h-[44px] text-[12px] font-bold text-brand-700">Cambiar fecha</button>
                     </div>
                     <div class="flex shrink-0 items-center gap-1.5">
                       ${n.eva !== null && n.eva !== undefined ? badge(`EVA ${n.eva}/10`, n.eva >= 7 ? 'rose' : n.eva >= 4 ? 'amber' : 'green') : ''}
@@ -1083,6 +1323,7 @@
                     </div>
                   </div>
                   <p class="mt-2 text-[13px] leading-relaxed text-ink-700">${E(n.texto)}</p>
+                  ${n.signos_vitales && Object.values(n.signos_vitales).some(v => v !== null && v !== '') ? `<div class="mt-2 rounded-xl bg-ink-50 p-3 text-[12px]"><strong>Signos vitales</strong><p>${[['ta', 'T/A', 'mmHg'], ['tem', 'TEM', '°C'], ['fc', 'FC', 'lpm'], ['fr', 'FR', 'rpm']].filter(([k]) => n.signos_vitales[k] !== null && n.signos_vitales[k] !== undefined && n.signos_vitales[k] !== '').map(([k, label, unidad]) => `${label}: ${E(n.signos_vitales[k])} ${unidad}`).join(' · ')}</p></div>` : ''}
                   ${(n.adjuntos || []).length ? `
                     <div class="mt-2.5 flex gap-2 overflow-x-auto no-scrollbar">
                       ${n.adjuntos.map((a) => `
@@ -1289,8 +1530,11 @@
 
     const secciones = Store.SECCIONES_VALORACION.map((sec) => {
       const on = sec.always || activas.has(sec.key);
+      // Goniometría y fuerza traen una tabla (.tbl) ancha: su <section>, que
+      // es la que es hijo directo de la rejilla, ocupa las dos columnas.
+      const tieneTabla = sec.campos.some((c) => c.type === 'rom' || c.type === 'mmt');
       return `
-        <section data-sec="${sec.key}" class="overflow-hidden rounded-2xl border ${on ? 'border-brand-200' : 'border-ink-200/70'} bg-white shadow-card transition">
+        <section data-sec="${sec.key}" class="overflow-hidden rounded-2xl border ${on ? 'border-brand-200' : 'border-ink-200/70'} bg-white shadow-card transition ${tieneTabla ? 'lg:col-span-2' : ''}">
           <header class="flex items-center gap-3 px-4 py-3">
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl ${on ? 'bg-brand-100 text-brand-700' : 'bg-ink-100 text-ink-400'}">
               ${icon(sec.icono, 'h-4 w-4')}
@@ -1316,7 +1560,7 @@
     const html = `
       <!-- pb-48: deja sitio a la barra de guardar, que crece si aparecen el
            aviso «sin guardar» y el resultado del guardado -->
-      <div class="space-y-3.5 px-4 pb-48 pt-4 anim-fade-up">
+      <div class="space-y-3.5 px-4 pb-48 pt-4 anim-fade-up lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">Valoración inicial</p>
           <p class="text-[15px] font-extrabold text-brand-900">${E(p.nombre)}</p>
@@ -1472,7 +1716,7 @@
 
   /** Lee el formulario de valoración del DOM y arma el objeto de datos. */
   function leerValoracion(root) {
-    const activas = ['general', 'diagnostico'];
+    const activas = Store.SECCIONES_VALORACION.filter(s => s.always).map(s => s.key);
     root.querySelectorAll('[data-toggle-sec]').forEach((c) => { if (c.checked) activas.push(c.dataset.toggleSec); });
 
     const datos = {};
@@ -1562,7 +1806,7 @@
       </button>`;
 
     const html = `
-      <div class="space-y-4 px-4 pb-48 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pb-48 pt-4 anim-fade-up sm:grid sm:grid-cols-2 sm:items-start sm:gap-3 sm:space-y-0 lg:grid-cols-3 xl:grid-cols-4">
 
         <div class="rounded-2xl bg-brand-50 px-4 py-3">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">${base ? 'Editar rutina' : 'Nueva rutina'}</p>
@@ -1795,7 +2039,7 @@
     };
 
     const html = `
-      <div class="space-y-4 px-4 pb-4 pt-4 anim-fade-up">
+      <div class="space-y-4 px-4 pb-4 pt-4 anim-fade-up lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
         <div class="rounded-2xl bg-gradient-to-br from-violet-600 to-violet-700 px-4 py-4 text-white shadow-card">
           <div class="flex items-center gap-2">${icon('sparkles', 'h-4 w-4')}
             <p class="text-[11px] font-extrabold uppercase tracking-wider">Programa de fidelidad</p></div>
@@ -1840,6 +2084,9 @@
                 <option value="M" ${p && p.sexo === 'M' ? 'selected' : ''}>Masculino</option>
               </select></div>
           </div>
+          <div><label class="mb-1 block text-[12px] font-bold text-ink-700">Fecha de nacimiento</label>
+            <input id="f-nacimiento" type="date" class="field" max="${CalendarioEventos.hoyCentro()}" value="${E(p && p.fecha_nacimiento || '')}" />
+            <p class="agenda-hint">Se usa para mostrar su cumpleaños y calcular su edad.</p></div>
           <div><label class="mb-1 block text-[12px] font-bold text-ink-700">Teléfono</label>
             <input id="f-tel" type="tel" inputmode="tel" class="field" value="${E(p ? p.telefono : '')}" placeholder="667 000 0000" /></div>
           <div><label class="mb-1 block text-[12px] font-bold text-ink-700">Correo</label>
@@ -1905,6 +2152,10 @@
           if (!nombre) return toast('El nombre es obligatorio', 'error');
           const vence = val(root, '#f-paq-vence');
           const pendiente = root.querySelector('#f-pendiente');
+          const nacimiento = val(root, '#f-nacimiento');
+          if (nacimiento && !CalendarioEventos.nacimientoValido(nacimiento)) return toast('Revisa la fecha de nacimiento; no puede ser futura.', 'error');
+          const hoy = CalendarioEventos.hoyCentro();
+          const edadNacimiento = nacimiento ? Number(hoy.slice(0, 4)) - Number(nacimiento.slice(0, 4)) - (hoy.slice(5) < nacimiento.slice(5) ? 1 : 0) : null;
           // Sin paquete se guardan ceros de forma explícita: si se dejaran los
           // valores que hubiera en los campos ocultos, apagar el interruptor
           // no borraría nada.
@@ -1914,7 +2165,8 @@
             // Quien llena esta ficha entera está completando el expediente;
             // solo sigue pendiente si el propio fisio lo deja marcado.
             expediente_pendiente: pendiente ? pendiente.checked : false,
-            edad: Number(val(root, '#f-edad')) || null,
+            edad: nacimiento ? edadNacimiento : Number(val(root, '#f-edad')) || null,
+            fecha_nacimiento: nacimiento || null,
             sexo: val(root, '#f-sexo'),
             telefono: val(root, '#f-tel'),
             email: val(root, '#f-email'),
@@ -1925,10 +2177,17 @@
             paquete_usadas: conPaquete ? (Number(val(root, '#f-paq-usadas')) || 0) : 0,
             paquete_vence: conPaquete && vence ? new Date(vence + 'T20:00:00').toISOString() : null
           };
-          if (p) { await API.actualizarPaciente(p.id, data); toast('Paciente actualizado'); }
-          else { const nuevo = await API.crearPaciente(data); toast('Paciente registrado'); location.hash = `#/t/paciente/${nuevo.id}`; }
-          closeSheet();
-          App.render();
+          const boton = root.querySelector('#btn-guardar-pac');
+          boton.disabled = true;
+          try {
+            if (p) { await API.actualizarPaciente(p.id, data); toast('Paciente actualizado'); }
+            else { const nuevo = await API.crearPaciente(data); toast('Paciente registrado'); location.hash = `#/t/paciente/${nuevo.id}`; }
+            closeSheet();
+            App.render();
+          } catch (err) {
+            toast(err.message || 'No se pudo guardar el paciente. Intenta de nuevo.', 'error');
+            boton.disabled = false;
+          }
         });
       }
     });
@@ -1954,14 +2213,14 @@
    *   · **Huecos ocupados.** Se avisa si el horario pisa otra cita viva. No se
    *     prohíbe —hay clínicas con dos camillas— pero se dice antes de guardar.
    */
-  async function sheetCita(pacienteId = null, citaId = null) {
+  async function sheetCita(pacienteId = null, citaId = null, fechaInicial = null) {
     const [pacs, cita, cfg] = await Promise.all([
       API.listarPacientes(),
       citaId ? API.obtenerCita(citaId) : Promise.resolve(null),
       API.getConfig()
     ]);
 
-    const def = cita ? new Date(cita.inicia_en) : (() => { const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1); return d; })();
+    const def = cita ? new Date(cita.inicia_en) : fechaInicial ? new Date(`${fechaInicial}T09:00:00`) : (() => { const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1); return d; })();
     const precioDef = cita && cita.precio !== null && cita.precio !== undefined ? cita.precio : cfg.precio_sesion;
 
     /* Reagendar no cambia de paciente: el selector de «nuevo» solo aparece al
@@ -2603,6 +2862,27 @@
   }
 
   /* --- Nueva nota de evolución + fotos -------------------------------- */
+  function sheetFechaNota(id, fecha) {
+    openSheet({
+      title: 'Cambiar fecha de la nota',
+      body: `<label for="f-fecha-nota" class="mb-1 block text-[12px] font-bold">Fecha y hora de atención</label><input id="f-fecha-nota" type="datetime-local" class="field" value="${E(toLocalInput(fecha))}" required />`,
+      footer: '<button id="guardar-fecha-nota" class="w-full rounded-xl bg-brand-600 py-3.5 font-bold text-white">Guardar fecha</button>',
+      onMount(root) {
+        root.querySelector('#guardar-fecha-nota').addEventListener('click', async (e) => {
+          const input = root.querySelector('#f-fecha-nota');
+          if (!input.reportValidity()) return;
+          const boton = e.currentTarget;
+          boton.disabled = true;
+          try {
+            await API.cambiarFechaNota(id, input.value);
+            closeSheet(); toast('Fecha actualizada'); App.render();
+          } catch (err) { toast(err.message || 'No se pudo cambiar la fecha', 'error', 5000); }
+          finally { boton.disabled = false; }
+        });
+      }
+    });
+  }
+
   async function sheetNota(pacienteId) {
     const adjuntos = [];
     openSheet({
@@ -2611,6 +2891,15 @@
       size: 'tall',
       body: `
         <div class="space-y-3">
+          <div><label for="f-nota-fecha" class="mb-1 block text-[12px] font-bold text-ink-700">Fecha y hora de atención *</label>
+            <input id="f-nota-fecha" type="datetime-local" class="field" value="${toLocalInput(new Date())}" required /></div>
+          <fieldset class="rounded-xl border border-ink-200 p-3"><legend class="px-1 text-[12px] font-bold text-ink-700">Signos vitales</legend>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label for="f-nota-ta" class="mb-1 block text-[12px] font-bold">T/A (mmHg)</label><input id="f-nota-ta" class="field" placeholder="120/80" /></div>
+              <div><label for="f-nota-tem" class="mb-1 block text-[12px] font-bold">TEM (°C)</label><input id="f-nota-tem" type="number" min="0.1" step="0.1" class="field" /></div>
+              <div><label for="f-nota-fc" class="mb-1 block text-[12px] font-bold">FC (lpm)</label><input id="f-nota-fc" type="number" min="1" step="1" class="field" /></div>
+              <div><label for="f-nota-fr" class="mb-1 block text-[12px] font-bold">FR (rpm)</label><input id="f-nota-fr" type="number" min="1" step="1" class="field" /></div>
+            </div></fieldset>
           <div>
             <div class="mb-1 flex items-center justify-between">
               <label class="text-[12px] font-bold text-ink-700">Dolor referido (EVA)</label>
@@ -2667,17 +2956,25 @@
           pintar();
         });
 
-        root.querySelector('#btn-guardar-nota').addEventListener('click', async () => {
+        root.querySelector('#btn-guardar-nota').addEventListener('click', async (e) => {
           const texto = val(root, '#f-nota-texto');
           if (!texto) return toast('Escribe la evolución', 'error');
+          if (![...root.querySelectorAll('input')].every(input => input.reportValidity())) return;
+          const boton = e.currentTarget;
+          boton.disabled = true;
+          try {
           await API.crearNota({
             paciente_id: pacienteId, texto,
+            fecha_nota: val(root, '#f-nota-fecha'),
+            signos_vitales: Object.fromEntries(['ta', 'tem', 'fc', 'fr'].map(k => [k, val(root, `#f-nota-${k}`)])),
             eva: Number(root.querySelector('#f-nota-eva').value),
             adjuntos
           });
           closeSheet();
           toast('Nota guardada');
           App.render();
+          } catch (err) { toast(err.message || 'No se pudo guardar la nota', 'error', 5000); }
+          finally { boton.disabled = false; }
         });
       }
     });
@@ -3677,7 +3974,7 @@
     sheetCatalogoEjercicios, sheetEjercicio, sheetMarcarFalta,
     leerValoracion, rutinaEnEdicion, hayCambiosSinGuardar, marcarLimpio,
     sheetPaciente, sheetCita, sheetMenuCita, sheetCancelarCita, sheetAsistencia,
-    sheetNota, sheetFoto, verArchivo, subirArchivosExpediente,
+    sheetNota, sheetFechaNota, sheetFoto, verArchivo, subirArchivosExpediente,
     sheetSorteo, sheetParticipantes, ejecutarSorteo, sheetPromos, sheetPromoForm,
     sheetSolicitudes, sheetClinica,
     sheetWhatsApp, whatsappCita, whatsappPaciente, sheetRecordatorios, MENSAJES

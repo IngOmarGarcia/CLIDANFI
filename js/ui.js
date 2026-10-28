@@ -20,7 +20,16 @@
 
   // Siempre devuelve una copia: addDays/startOfDay mutan el objeto que reciben
   // y si no clonáramos aquí, `addDays(ini, 7)` corrompería `ini`.
-  const toDate = (v) => (v instanceof Date ? new Date(v.getTime()) : new Date(v));
+  // Una fecha civil no es un instante UTC: YYYY-MM-DD debe conservar su día
+  // en la zona local. Los timestamps con Z/desfase sí representan instantes.
+  const toDate = (v) => {
+    if (v instanceof Date) return new Date(v.getTime());
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      const [ano, mes, dia] = v.split('-').map(Number);
+      return new Date(ano, mes - 1, dia);
+    }
+    return new Date(v);
+  };
   const startOfDay = (v) => { const d = toDate(v); d.setHours(0, 0, 0, 0); return d; };
   const addDays = (v, n) => { const d = toDate(v); d.setDate(d.getDate() + n); return d; };
   const isoDay = (v) => { const d = startOfDay(v); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
@@ -390,11 +399,11 @@
     wrap.className = 'fixed inset-0 z-50';
     wrap.innerHTML = `
       <div data-sheet-backdrop class="anim-fade absolute inset-0 bg-ink-900/45 backdrop-blur-[2px]"></div>
-      <div class="absolute inset-x-0 bottom-0 mx-auto w-full max-w-[480px]">
+      <div class="absolute inset-x-0 bottom-0 mx-auto w-full max-w-[480px] lg:inset-y-0 lg:flex lg:max-w-2xl lg:items-center">
         <section role="dialog" aria-modal="true" aria-label="${escapeHtml(title || 'Panel')}"
-          class="anim-sheet flex ${heights[size] || heights.auto} flex-col overflow-hidden rounded-t-[1.75rem] bg-white shadow-lift">
+          class="anim-sheet flex ${heights[size] || heights.auto} flex-col overflow-hidden rounded-t-[1.75rem] bg-white shadow-lift lg:max-h-[85dvh] lg:w-full lg:rounded-[1.5rem]">
           <header class="shrink-0 border-b border-ink-100 px-4 pb-3 pt-2">
-            <div class="mx-auto mb-2.5 h-1.5 w-10 rounded-full bg-ink-200"></div>
+            <div class="mx-auto mb-2.5 h-1.5 w-10 rounded-full bg-ink-200 lg:hidden"></div>
             <div class="flex items-start gap-3">
               <div class="min-w-0 flex-1">
                 <h2 class="truncate text-[16px] font-extrabold tracking-tight text-ink-900">${escapeHtml(title || '')}</h2>

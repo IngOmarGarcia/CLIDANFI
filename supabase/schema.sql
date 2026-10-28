@@ -79,6 +79,7 @@ create table if not exists pacientes (
   telefono        text default '',
   email           text default '',
   edad            int,
+  fecha_nacimiento date,
   sexo            char(1),
   diagnostico     text default '',
   alergias        text default '',
@@ -101,6 +102,7 @@ create table if not exists pacientes (
 -- Para bases creadas antes de la agenda sin registro previo.
 alter table pacientes
   add column if not exists expediente_pendiente boolean not null default false;
+alter table pacientes add column if not exists fecha_nacimiento date;
 
 -- El paquete dejó de ser obligatorio. Se cambia solo el DEFAULT: los pacientes
 -- que ya tienen un paquete contratado conservan su saldo intacto.
@@ -270,6 +272,13 @@ create table if not exists notas (
 );
 
 create index if not exists idx_notas_paciente on notas(paciente_id, creado_en desc);
+
+-- Fecha de atención independiente de la fecha de captura y signos de la sesión.
+alter table notas add column if not exists fecha_nota timestamptz;
+alter table notas add column if not exists signos_vitales jsonb not null default '{}'::jsonb;
+update notas set fecha_nota = creado_en where fecha_nota is null;
+alter table notas alter column fecha_nota set default now();
+alter table notas alter column fecha_nota set not null;
 
 -- ----------------------------------------------------------------------------
 -- 7 bis · ARCHIVOS DEL EXPEDIENTE  (imágenes y PDF sueltos)
