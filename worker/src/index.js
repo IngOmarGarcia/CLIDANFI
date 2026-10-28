@@ -296,9 +296,13 @@ async function ejecutar(cron, env, forzar = false) {
 export default {
   /** Disparo automático por Cron Trigger. */
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(respaldarValoraciones(env)
-      .then(r => console.log('[drive]', JSON.stringify(r)))
-      .catch(e => console.error('[drive] ERROR:', e.message)));
+    // A las horas en punto coinciden ambos cron. Drive se procesa solo con
+    // el de cinco minutos para no organizar ni crear informes dos veces a la vez.
+    if (event.cron !== CRON_DIARIO) {
+      ctx.waitUntil(respaldarValoraciones(env)
+        .then(r => console.log('[drive]', JSON.stringify(r)))
+        .catch(e => console.error('[drive] ERROR:', e.message)));
+    }
     ctx.waitUntil(
       ejecutar(event.cron, env)
         .then((r) => console.log('[avisos]', JSON.stringify(r)))
