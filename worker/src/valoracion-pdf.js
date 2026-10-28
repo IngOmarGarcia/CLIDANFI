@@ -8,6 +8,9 @@ const secciones = {
   marcha: 'Análisis de marcha', neuro: 'Valoración neurológica', diagnostico: 'Diagnóstico y plan'
 };
 const etiquetas = {
+  fecha_nota: 'Fecha de atención', signos_vitales: 'Signos vitales',
+  ta: 'T/A (mmHg)', tem: 'TEM (°C)', fc: 'FC (lpm)', fr: 'FR (rpm)',
+  patologicos_detalle: 'Detalle de antecedentes personales patológicos',
   ficha: 'Ficha del paciente', evolucion: 'Nota de evolución', rutina: 'Rutina de ejercicios',
   recibo: 'Recibo de pago', cita: 'Cita', texto: 'Evolución', eva: 'EVA (0-10)',
   adjuntos: 'Evidencias', titulo: 'Título', notas: 'Notas', nombre: 'Nombre',
@@ -16,7 +19,7 @@ const etiquetas = {
   monto: 'Importe (MXN)', metodo: 'Método de pago', concepto: 'Concepto', pagado_en: 'Fecha de pago',
   motivo: 'Motivo de consulta', inicio: 'Inicio de los síntomas', mecanismo: 'Mecanismo de lesión',
   ocupacion: 'Ocupación', actividad: 'Actividad física', referido: 'Médico que refiere',
-  patologicos: 'Antecedentes patológicos', quirurgicos: 'Antecedentes quirúrgicos',
+  patologicos: 'Antecedentes personales patológicos', quirurgicos: 'Antecedentes quirúrgicos',
   medicamentos: 'Medicamentos', alergias: 'Alergias', estudios: 'Estudios de gabinete',
   eva_reposo: 'EVA en reposo (0-10)', eva_actividad: 'EVA en actividad (0-10)',
   localizacion: 'Localización', tipo: 'Tipo de dolor', irradiacion: 'Irradiación',

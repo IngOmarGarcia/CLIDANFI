@@ -1312,8 +1312,9 @@
                 ${card(`
                   <div class="flex items-start justify-between gap-2">
                     <div>
-                      <p class="text-[12.5px] font-extrabold capitalize text-ink-900">${E(relDay(n.creado_en))}</p>
-                      <p class="text-[11px] font-medium text-ink-400">${E(fmtDateTime(n.creado_en))}</p>
+                      <p class="text-[12.5px] font-extrabold capitalize text-ink-900">${E(relDay(n.fecha_nota || n.creado_en))}</p>
+                      <p class="text-[11px] font-medium text-ink-400">${E(fmtDateTime(n.fecha_nota || n.creado_en))}</p>
+                      <button data-action="fecha-nota" data-id="${E(n.id)}" data-fecha="${E(n.fecha_nota || n.creado_en)}" class="min-h-[44px] text-[12px] font-bold text-brand-700">Cambiar fecha</button>
                     </div>
                     <div class="flex shrink-0 items-center gap-1.5">
                       ${n.eva !== null && n.eva !== undefined ? badge(`EVA ${n.eva}/10`, n.eva >= 7 ? 'rose' : n.eva >= 4 ? 'amber' : 'green') : ''}
@@ -1322,6 +1323,7 @@
                     </div>
                   </div>
                   <p class="mt-2 text-[13px] leading-relaxed text-ink-700">${E(n.texto)}</p>
+                  ${n.signos_vitales && Object.values(n.signos_vitales).some(v => v !== null && v !== '') ? `<div class="mt-2 rounded-xl bg-ink-50 p-3 text-[12px]"><strong>Signos vitales</strong><p>${[['ta', 'T/A', 'mmHg'], ['tem', 'TEM', '°C'], ['fc', 'FC', 'lpm'], ['fr', 'FR', 'rpm']].filter(([k]) => n.signos_vitales[k] !== null && n.signos_vitales[k] !== undefined && n.signos_vitales[k] !== '').map(([k, label, unidad]) => `${label}: ${E(n.signos_vitales[k])} ${unidad}`).join(' · ')}</p></div>` : ''}
                   ${(n.adjuntos || []).length ? `
                     <div class="mt-2.5 flex gap-2 overflow-x-auto no-scrollbar">
                       ${n.adjuntos.map((a) => `
@@ -1714,7 +1716,7 @@
 
   /** Lee el formulario de valoración del DOM y arma el objeto de datos. */
   function leerValoracion(root) {
-    const activas = ['general', 'diagnostico'];
+    const activas = Store.SECCIONES_VALORACION.filter(s => s.always).map(s => s.key);
     root.querySelectorAll('[data-toggle-sec]').forEach((c) => { if (c.checked) activas.push(c.dataset.toggleSec); });
 
     const datos = {};
@@ -2860,6 +2862,27 @@
   }
 
   /* --- Nueva nota de evolución + fotos -------------------------------- */
+  function sheetFechaNota(id, fecha) {
+    openSheet({
+      title: 'Cambiar fecha de la nota',
+      body: `<label for="f-fecha-nota" class="mb-1 block text-[12px] font-bold">Fecha y hora de atención</label><input id="f-fecha-nota" type="datetime-local" class="field" value="${E(toLocalInput(fecha))}" required />`,
+      footer: '<button id="guardar-fecha-nota" class="w-full rounded-xl bg-brand-600 py-3.5 font-bold text-white">Guardar fecha</button>',
+      onMount(root) {
+        root.querySelector('#guardar-fecha-nota').addEventListener('click', async (e) => {
+          const input = root.querySelector('#f-fecha-nota');
+          if (!input.reportValidity()) return;
+          const boton = e.currentTarget;
+          boton.disabled = true;
+          try {
+            await API.cambiarFechaNota(id, input.value);
+            closeSheet(); toast('Fecha actualizada'); App.render();
+          } catch (err) { toast(err.message || 'No se pudo cambiar la fecha', 'error', 5000); }
+          finally { boton.disabled = false; }
+        });
+      }
+    });
+  }
+
   async function sheetNota(pacienteId) {
     const adjuntos = [];
     openSheet({
@@ -2868,6 +2891,15 @@
       size: 'tall',
       body: `
         <div class="space-y-3">
+          <div><label for="f-nota-fecha" class="mb-1 block text-[12px] font-bold text-ink-700">Fecha y hora de atención *</label>
+            <input id="f-nota-fecha" type="datetime-local" class="field" value="${toLocalInput(new Date())}" required /></div>
+          <fieldset class="rounded-xl border border-ink-200 p-3"><legend class="px-1 text-[12px] font-bold text-ink-700">Signos vitales</legend>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label for="f-nota-ta" class="mb-1 block text-[12px] font-bold">T/A (mmHg)</label><input id="f-nota-ta" class="field" placeholder="120/80" /></div>
+              <div><label for="f-nota-tem" class="mb-1 block text-[12px] font-bold">TEM (°C)</label><input id="f-nota-tem" type="number" min="0.1" step="0.1" class="field" /></div>
+              <div><label for="f-nota-fc" class="mb-1 block text-[12px] font-bold">FC (lpm)</label><input id="f-nota-fc" type="number" min="1" step="1" class="field" /></div>
+              <div><label for="f-nota-fr" class="mb-1 block text-[12px] font-bold">FR (rpm)</label><input id="f-nota-fr" type="number" min="1" step="1" class="field" /></div>
+            </div></fieldset>
           <div>
             <div class="mb-1 flex items-center justify-between">
               <label class="text-[12px] font-bold text-ink-700">Dolor referido (EVA)</label>
@@ -2924,17 +2956,25 @@
           pintar();
         });
 
-        root.querySelector('#btn-guardar-nota').addEventListener('click', async () => {
+        root.querySelector('#btn-guardar-nota').addEventListener('click', async (e) => {
           const texto = val(root, '#f-nota-texto');
           if (!texto) return toast('Escribe la evolución', 'error');
+          if (![...root.querySelectorAll('input')].every(input => input.reportValidity())) return;
+          const boton = e.currentTarget;
+          boton.disabled = true;
+          try {
           await API.crearNota({
             paciente_id: pacienteId, texto,
+            fecha_nota: val(root, '#f-nota-fecha'),
+            signos_vitales: Object.fromEntries(['ta', 'tem', 'fc', 'fr'].map(k => [k, val(root, `#f-nota-${k}`)])),
             eva: Number(root.querySelector('#f-nota-eva').value),
             adjuntos
           });
           closeSheet();
           toast('Nota guardada');
           App.render();
+          } catch (err) { toast(err.message || 'No se pudo guardar la nota', 'error', 5000); }
+          finally { boton.disabled = false; }
         });
       }
     });
@@ -3934,7 +3974,7 @@
     sheetCatalogoEjercicios, sheetEjercicio, sheetMarcarFalta,
     leerValoracion, rutinaEnEdicion, hayCambiosSinGuardar, marcarLimpio,
     sheetPaciente, sheetCita, sheetMenuCita, sheetCancelarCita, sheetAsistencia,
-    sheetNota, sheetFoto, verArchivo, subirArchivosExpediente,
+    sheetNota, sheetFechaNota, sheetFoto, verArchivo, subirArchivosExpediente,
     sheetSorteo, sheetParticipantes, ejecutarSorteo, sheetPromos, sheetPromoForm,
     sheetSolicitudes, sheetClinica,
     sheetWhatsApp, whatsappCita, whatsappPaciente, sheetRecordatorios, MENSAJES

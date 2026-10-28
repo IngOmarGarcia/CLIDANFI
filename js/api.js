@@ -986,16 +986,44 @@
     return { ruta, url: data.signedUrl };
   };
 
-  const notasDePaciente = async (pacienteId) =>
-    ok(await sb.from('notas').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }));
+  const notasDePaciente = async (pacienteId) => {
+    const notas = ok(await sb.from('notas').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }));
+    return notas.sort((a, b) => new Date(b.fecha_nota || b.creado_en) - new Date(a.fecha_nota || a.creado_en));
+  };
 
-  const crearNota = async ({ paciente_id, texto, eva = null, tipo = 'evolucion', adjuntos = [] }) => {
+  const fechaNotaValida = (fecha) => {
+    const d = new Date(fecha);
+    if (!fecha || !Number.isFinite(d.getTime())) throw new Error('Indica una fecha válida para la nota');
+    return d.toISOString();
+  };
+
+  const signosNotaValidos = (signos = {}) => {
+    const resultado = {};
+    const ta = String(signos.ta || '').trim();
+    if (ta && !/^\d{1,3}\s*\/\s*\d{1,3}$/.test(ta)) throw new Error('T/A debe tener el formato 120/80');
+    resultado.ta = ta.replace(/\s/g, '');
+    for (const campo of ['tem', 'fc', 'fr']) {
+      const valor = signos[campo];
+      resultado[campo] = valor === '' || valor == null ? null : Number(valor);
+      if (resultado[campo] !== null && (!Number.isFinite(resultado[campo]) || resultado[campo] <= 0 || (campo !== 'tem' && !Number.isInteger(resultado[campo])))) {
+        throw new Error(`Valor inválido para ${campo.toUpperCase()}`);
+      }
+    }
+    return resultado;
+  };
+
+  const cambiarFechaNota = async (id, fecha) =>
+    ok(await sb.from('notas').update({ fecha_nota: fechaNotaValida(fecha) }).eq('id', id).select().single());
+
+  const crearNota = async ({ paciente_id, texto, eva = null, tipo = 'evolucion', adjuntos = [], fecha_nota = new Date().toISOString(), signos_vitales = {} }) => {
+    const fecha = fechaNotaValida(fecha_nota);
+    const signos = signosNotaValidos(signos_vitales);
     const subidos = [];
     for (const a of adjuntos) {
       const r = a.url.startsWith('data:') ? await _subirEvidencia(a.url, paciente_id) : { url: a.url, ruta: null };
       subidos.push({ id: uid('adj'), url: r.url, ruta: r.ruta, titulo: a.titulo || 'Evidencia', creado_en: new Date().toISOString() });
     }
-    return ok(await sb.from('notas').insert({ paciente_id, tipo, texto, eva, adjuntos: subidos }).select().single());
+    return ok(await sb.from('notas').insert({ paciente_id, tipo, texto, eva, adjuntos: subidos, fecha_nota: fecha, signos_vitales: signos }).select().single());
   };
 
   const agregarAdjunto = async (notaId, { url, titulo = 'Evidencia' }) => {
@@ -1769,7 +1797,7 @@
     'listarEjercicios', 'guardarEjercicio', 'eliminarEjercicio',
     'agregarOpcionValoracion', 'eliminarOpcionValoracion',
     'registrarPago', 'actualizarPago', 'eliminarPago', 'ingresosSemana',
-    'guardarValoracion', 'crearNota', 'agregarAdjunto', 'eliminarNota',
+    'guardarValoracion', 'crearNota', 'cambiarFechaNota', 'agregarAdjunto', 'eliminarNota',
     'subirArchivo', 'eliminarArchivo', 'enlaceDeArchivo',
     'guardarRutina', 'activarRutina', 'eliminarRutina',
     'guardarPromocion', 'eliminarPromocion',
@@ -1841,7 +1869,7 @@
     valoracionDePaciente, guardarValoracion, historialValoraciones,
     opcionesValoracion, agregarOpcionValoracion, eliminarOpcionValoracion,
     listarEjercicios, guardarEjercicio, eliminarEjercicio,
-    notasDePaciente, crearNota, agregarAdjunto, eliminarNota,
+    notasDePaciente, crearNota, cambiarFechaNota, agregarAdjunto, eliminarNota,
     archivosDePaciente, subirArchivo, eliminarArchivo, enlaceDeArchivo,
     rutinasDePaciente, rutinaActiva, guardarRutina, activarRutina, eliminarRutina,
     listarPromociones, guardarPromocion, eliminarPromocion,

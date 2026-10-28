@@ -26,3 +26,24 @@ for (const zona of ['America/Mexico_City', 'America/Mazatlan', 'UTC']) {
   assert(cita.toISOString() >= desde && cita.toISOString() <= hasta);
   console.log(`Fechas correctas: ${zona}`);
 }
+
+// Cita nocturna: en UTC ya es el día siguiente, pero el encabezado de la
+// agenda debe conservar el día local al convertir timestamp → YYYY-MM-DD.
+process.env.TZ = 'America/Mexico_City';
+const DateReal = Date;
+class RelojCita extends DateReal {
+  constructor(...args) { super(...(args.length ? args : ['2026-10-28T04:08:00Z'])); }
+  static now() { return new DateReal('2026-10-28T04:08:00Z').getTime(); }
+}
+const nocturno = { window: {}, Date: RelojCita, Intl };
+vm.createContext(nocturno);
+vm.runInContext(codigo, nocturno);
+const ui = nocturno.window.UI;
+const guardada = new RelojCita('2026-10-27T22:08').toISOString();
+assert.equal(guardada, '2026-10-28T04:08:00.000Z');
+const diaAgenda = ui.isoDay(guardada);
+assert.equal(diaAgenda, '2026-10-27');
+assert.equal(ui.relDay(diaAgenda), 'Hoy');
+assert.equal(ui.fmtDate(diaAgenda), '27 Oct 2026');
+assert.equal(ui.toLocalInput(guardada), '2026-10-27T22:08');
+console.log('Cita a las 10:08 p. m.: conserva fecha local y encabezado Hoy.');

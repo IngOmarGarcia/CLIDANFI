@@ -11,6 +11,15 @@ const base = { id: '11111111-1111-4111-8111-111111111111', documento_id: 'nota',
 const nota = { ...base, origen: 'notas', contenido: { texto: 'Evolución ficticia', eva: 0,
   adjuntos: [{ ruta: 'paciente/evidencia.jpg', titulo: 'Prueba', url: 'https://no-solicitar.test/secreto' }] } };
 
+test('el respaldo conserva fecha de atención y signos vitales de la nota', async () => {
+  const signos = { ta: '120/80', tem: 36.5, fc: 72, fr: 18 };
+  const doc = prepararDocumento({ ...nota, contenido: { ...nota.contenido,
+    fecha_nota: '2026-09-15T16:30:00Z', signos_vitales: signos } });
+  assert.equal(doc.contenido.datos.evolucion.fecha_nota, '2026-09-15T16:30:00Z');
+  assert.deepEqual(doc.contenido.datos.evolucion.signos_vitales, signos);
+  assert.equal((await PDFDocument.load(await generarValoracionPdf(doc))).getPageCount(), 1);
+});
+
 test('las citas se excluyen de las subidas y solo se retiran sus copias', async () => {
   const cambios = [], peticiones = [];
   const db = { borrar: async (...args) => cambios.push(args),

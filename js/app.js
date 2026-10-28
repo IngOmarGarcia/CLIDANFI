@@ -566,6 +566,7 @@
     'registrar-asistencia': (el) => VistaFisio.sheetAsistencia(el.dataset.id),
     'abrir-valoracion':     (el) => { location.hash = `#/t/valoracion/${el.dataset.id}`; },
     'nueva-nota':           (el) => VistaFisio.sheetNota(el.dataset.id),
+    'fecha-nota':           (el) => VistaFisio.sheetFechaNota(el.dataset.id, el.dataset.fecha),
     'ver-foto':             (el) => VistaFisio.sheetFoto(el.dataset.url, el.dataset.titulo),
     'ver-archivo':          (el) => VistaFisio.verArchivo(el.dataset.id),
 

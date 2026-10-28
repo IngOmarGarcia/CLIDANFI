@@ -14,6 +14,8 @@ export function prepararDocumento(version) {
     }
     case 'notas':
       datos = { evolucion: { tipo: c.tipo, texto: c.texto, eva: c.eva,
+        fecha_nota: c.fecha_nota || c.creado_en,
+        signos_vitales: c.signos_vitales || {},
         adjuntos: (c.adjuntos || []).map(a => a.ruta ? a.titulo || 'Evidencia'
           : `${a.titulo || 'Referencia externa'}: ${a.url || 'Sin enlace'}`) } }; break;
     case 'rutinas':

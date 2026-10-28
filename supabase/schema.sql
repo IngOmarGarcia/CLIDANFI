@@ -273,6 +273,13 @@ create table if not exists notas (
 
 create index if not exists idx_notas_paciente on notas(paciente_id, creado_en desc);
 
+-- Fecha de atención independiente de la fecha de captura y signos de la sesión.
+alter table notas add column if not exists fecha_nota timestamptz;
+alter table notas add column if not exists signos_vitales jsonb not null default '{}'::jsonb;
+update notas set fecha_nota = creado_en where fecha_nota is null;
+alter table notas alter column fecha_nota set default now();
+alter table notas alter column fecha_nota set not null;
+
 -- ----------------------------------------------------------------------------
 -- 7 bis · ARCHIVOS DEL EXPEDIENTE  (imágenes y PDF sueltos)
 --
