@@ -552,26 +552,15 @@
     return rows.map((p) => ({ ...p, proxima_cita: null }));
   };
 
-  const pacientesCumpleanos = async () => {
-    const rows = [];
-    for (let desde = 0; ; desde += 1000) {
-      // Leer la tabla evita depender de que una vista antigua incluya columnas nuevas.
-      const pagina = ok(await sb.from('pacientes').select('*').order('id').range(desde, desde + 999));
-      rows.push(...pagina.map(p => ({ id: p.id, nombre: p.nombre, fecha_nacimiento: p.fecha_nacimiento || null, activo: p.activo })));
-      if (pagina.length < 1000) return rows;
-    }
-  };
-
   const obtenerPaciente = async (id) => {
     const rows = ok(await sb.from('pacientes_ordenados').select('*').eq('id', id).limit(1));
     if (!rows.length) return null;
-    const base = ok(await sb.from('pacientes').select('*').eq('id', id).limit(1));
-    return { ...rows[0], ...(base[0] || {}), proxima_cita: await _proximaCitaDe(id) };
+    return { ...rows[0], proxima_cita: await _proximaCitaDe(id) };
   };
 
   const crearPaciente = async (data) =>
     _escrituraTolerante((fila) => sb.from('pacientes').insert(fila).select().single(),
-      data, ['expediente_pendiente', ...(!data.fecha_nacimiento ? ['fecha_nacimiento'] : [])]);
+      data, ['expediente_pendiente']);
 
   /**
    * Alta exprés: la persona llega sin expediente y solo se le pide nombre y
@@ -599,7 +588,7 @@
 
   const actualizarPaciente = async (id, patch) =>
     _escrituraTolerante((fila) => sb.from('pacientes').update(fila).eq('id', id).select().single(),
-      patch, ['expediente_pendiente', ...(!patch.fecha_nacimiento ? ['fecha_nacimiento'] : [])]);
+      patch, ['expediente_pendiente']);
 
   const eliminarPaciente = async (id) => {
     ok(await sb.from('pacientes').delete().eq('id', id));  // cascada por FK
@@ -614,23 +603,11 @@
 
   const SELECT_CITA = '*, pacientes(id, nombre, telefono, diagnostico)';
 
-  // Paginar evita perder silenciosamente el historial al superar 1.000 filas.
-  const historialCitas = async () => {
-    const rows = [];
-    for (let desde = 0; ; desde += 1000) {
-      const pagina = ok(await sb.from('citas').select(SELECT_CITA)
-        .order('inicia_en', { ascending: true }).order('id', { ascending: true })
-        .range(desde, desde + 999));
-      rows.push(...pagina);
-      if (pagina.length < 1000) return _conNombre(rows);
-    }
-  };
-
   const citasDeHoy = async () => {
     const hoy = isoDay(new Date());
     return _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
-      .gte('inicia_en', new Date(`${hoy}T00:00:00`).toISOString())
-      .lte('inicia_en', new Date(`${hoy}T23:59:59.999`).toISOString())
+      .gte('inicia_en', `${hoy}T00:00:00`)
+      .lte('inicia_en', `${hoy}T23:59:59`)
       .order('inicia_en', { ascending: true })));
   };
 
@@ -897,17 +874,10 @@
     if (id) {
       return ok(await sb.from('valoraciones')
         .update({ secciones_activas, datos, actualizado_en: new Date().toISOString() })
-        .eq('id', id).eq('paciente_id', pacienteId).select().single());
+        .eq('id', id).select().single());
     }
     return ok(await sb.from('valoraciones')
       .insert({ paciente_id: pacienteId, secciones_activas, datos }).select().single());
-  };
-
-  const historialValoraciones = async (pacienteId) => {
-    const res = await sb.from('valoraciones_versiones').select('*')
-      .eq('paciente_id', pacienteId).order('creado_en', { ascending: false });
-    if (res.error && _esFalta(res.error)) return null;
-    return ok(res);
   };
 
   /* --- Opciones personalizadas ------------------------------------------
@@ -986,44 +956,16 @@
     return { ruta, url: data.signedUrl };
   };
 
-  const notasDePaciente = async (pacienteId) => {
-    const notas = ok(await sb.from('notas').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }));
-    return notas.sort((a, b) => new Date(b.fecha_nota || b.creado_en) - new Date(a.fecha_nota || a.creado_en));
-  };
+  const notasDePaciente = async (pacienteId) =>
+    ok(await sb.from('notas').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }));
 
-  const fechaNotaValida = (fecha) => {
-    const d = new Date(fecha);
-    if (!fecha || !Number.isFinite(d.getTime())) throw new Error('Indica una fecha válida para la nota');
-    return d.toISOString();
-  };
-
-  const signosNotaValidos = (signos = {}) => {
-    const resultado = {};
-    const ta = String(signos.ta || '').trim();
-    if (ta && !/^\d{1,3}\s*\/\s*\d{1,3}$/.test(ta)) throw new Error('T/A debe tener el formato 120/80');
-    resultado.ta = ta.replace(/\s/g, '');
-    for (const campo of ['tem', 'fc', 'fr']) {
-      const valor = signos[campo];
-      resultado[campo] = valor === '' || valor == null ? null : Number(valor);
-      if (resultado[campo] !== null && (!Number.isFinite(resultado[campo]) || resultado[campo] <= 0 || (campo !== 'tem' && !Number.isInteger(resultado[campo])))) {
-        throw new Error(`Valor inválido para ${campo.toUpperCase()}`);
-      }
-    }
-    return resultado;
-  };
-
-  const cambiarFechaNota = async (id, fecha) =>
-    ok(await sb.from('notas').update({ fecha_nota: fechaNotaValida(fecha) }).eq('id', id).select().single());
-
-  const crearNota = async ({ paciente_id, texto, eva = null, tipo = 'evolucion', adjuntos = [], fecha_nota = new Date().toISOString(), signos_vitales = {} }) => {
-    const fecha = fechaNotaValida(fecha_nota);
-    const signos = signosNotaValidos(signos_vitales);
+  const crearNota = async ({ paciente_id, texto, eva = null, tipo = 'evolucion', adjuntos = [] }) => {
     const subidos = [];
     for (const a of adjuntos) {
       const r = a.url.startsWith('data:') ? await _subirEvidencia(a.url, paciente_id) : { url: a.url, ruta: null };
       subidos.push({ id: uid('adj'), url: r.url, ruta: r.ruta, titulo: a.titulo || 'Evidencia', creado_en: new Date().toISOString() });
     }
-    return ok(await sb.from('notas').insert({ paciente_id, tipo, texto, eva, adjuntos: subidos, fecha_nota: fecha, signos_vitales: signos }).select().single());
+    return ok(await sb.from('notas').insert({ paciente_id, tipo, texto, eva, adjuntos: subidos }).select().single());
   };
 
   const agregarAdjunto = async (notaId, { url, titulo = 'Evidencia' }) => {
@@ -1289,14 +1231,22 @@
   };
 
   const guardarRutina = async (pacienteId, { titulo, notas = '', items = [], id = null }) => {
-    const rutinaId = ok(await sb.rpc('guardar_rutina_completa', {
-      paciente: pacienteId, titulo, notas, rutina: id,
-      items: items.map(it => ({
-        ejercicio_id: it.ejercicio_id,
+    let rutinaId = id;
+    if (rutinaId) {
+      ok(await sb.from('rutinas').update({ titulo, notas, activa: true }).eq('id', rutinaId));
+      ok(await sb.from('rutina_items').delete().eq('rutina_id', rutinaId));
+    } else {
+      const r = ok(await sb.from('rutinas').insert({ paciente_id: pacienteId, titulo, notas, activa: true }).select().single());
+      rutinaId = r.id;
+    }
+
+    if (items.length) {
+      ok(await sb.from('rutina_items').insert(items.map((it, i) => ({
+        rutina_id: rutinaId, ejercicio_id: it.ejercicio_id, orden: i,
         series: Number(it.series) || 0, reps: Number(it.reps) || 0, hold: Number(it.hold) || 0,
         frecuencia: it.frecuencia || 'Diario', nota: it.nota || ''
-      }))
-    }));
+      }))));
+    }
     // El trigger `trg_una_rutina_activa` desactiva las demás
     const r = ok(await sb.from('rutinas').select(SELECT_RUTINA).eq('id', rutinaId).single());
     return _mapRutina(r);
@@ -1668,8 +1618,6 @@
                  { objeto: 'solicitudes_cita', tolerarPermiso: true })
       ]);
 
-    // Un contador fallido no significa que la clínica tenga cero registros.
-    [atendidosHoy, atendidosSemana, pacientesActivos, sorteosActivos].forEach(ok);
     return {
       ingresos,
       citas_hoy: citasHoy,
@@ -1770,8 +1718,8 @@
     const manana = isoDay(addDays(new Date(), 1));
     return _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
       .eq('estado', 'agendada')
-      .gte('inicia_en', new Date(`${manana}T00:00:00`).toISOString())
-      .lte('inicia_en', new Date(`${manana}T23:59:59.999`).toISOString())
+      .gte('inicia_en', `${manana}T00:00:00`)
+      .lte('inicia_en', `${manana}T23:59:59`)
       .order('inicia_en', { ascending: true })));
   };
 
@@ -1789,7 +1737,6 @@
      ====================================================================== */
 
   const SOLO_FISIO = [
-    'historialValoraciones',
     'listarPacientes', 'crearPaciente', 'crearPacienteExpres', 'actualizarPaciente', 'eliminarPaciente',
     'citasDeHoy', 'proximasCitas', 'citasDeManana', 'obtenerCita', 'crearCita', 'actualizarCita',
     'cancelarCita', 'marcarFalta', 'reactivarCita', 'eliminarCita', 'conflictosDeAgenda',
@@ -1797,7 +1744,7 @@
     'listarEjercicios', 'guardarEjercicio', 'eliminarEjercicio',
     'agregarOpcionValoracion', 'eliminarOpcionValoracion',
     'registrarPago', 'actualizarPago', 'eliminarPago', 'ingresosSemana',
-    'guardarValoracion', 'crearNota', 'cambiarFechaNota', 'agregarAdjunto', 'eliminarNota',
+    'guardarValoracion', 'crearNota', 'agregarAdjunto', 'eliminarNota',
     'subirArchivo', 'eliminarArchivo', 'enlaceDeArchivo',
     'guardarRutina', 'activarRutina', 'eliminarRutina',
     'guardarPromocion', 'eliminarPromocion',
@@ -1859,17 +1806,17 @@
      ====================================================================== */
   global.API = Object.assign(_proteger({
     setConfig, subirLogo, quitarLogo,
-    pacientesCumpleanos, listarPacientes, obtenerPaciente, crearPaciente, crearPacienteExpres,
+    listarPacientes, obtenerPaciente, crearPaciente, crearPacienteExpres,
     actualizarPaciente, eliminarPaciente,
-    historialCitas, citasDeHoy, proximasCitas, citasDeManana, citasDePaciente, proximaCitaDePaciente, obtenerCita,
+    citasDeHoy, proximasCitas, citasDeManana, citasDePaciente, proximaCitaDePaciente, obtenerCita,
     crearCita, actualizarCita, cancelarCita, marcarFalta, reactivarCita,
     eliminarCita, conflictosDeAgenda, cumplimientoDePaciente,
     registrarAsistencia, asistenciasDePaciente, eliminarAsistencia,
     registrarPago, actualizarPago, eliminarPago, ingresosSemana, pagosDePaciente,
-    valoracionDePaciente, guardarValoracion, historialValoraciones,
+    valoracionDePaciente, guardarValoracion,
     opcionesValoracion, agregarOpcionValoracion, eliminarOpcionValoracion,
     listarEjercicios, guardarEjercicio, eliminarEjercicio,
-    notasDePaciente, crearNota, cambiarFechaNota, agregarAdjunto, eliminarNota,
+    notasDePaciente, crearNota, agregarAdjunto, eliminarNota,
     archivosDePaciente, subirArchivo, eliminarArchivo, enlaceDeArchivo,
     rutinasDePaciente, rutinaActiva, guardarRutina, activarRutina, eliminarRutina,
     listarPromociones, guardarPromocion, eliminarPromocion,

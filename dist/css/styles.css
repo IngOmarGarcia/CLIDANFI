@@ -89,10 +89,9 @@ input, select, textarea { font-size: 16px; }
 .app-shell { position: relative; z-index: 1; }
 
 @media (min-width: 900px) {
-  /* --- SIN SESIÓN · el marco de dispositivo, tal cual estaba ------------- */
-  body:not(.con-sesion) .app-watermark { display: block; }
+  .app-watermark { display: block; }
 
-  body:not(.con-sesion) .app-shell {
+  .app-shell {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -105,7 +104,7 @@ input, select, textarea { font-size: 16px; }
      contenedor de referencia de sus hijos `position: fixed` (nav inferior,
      botón flotante, paneles y avisos), que así quedan dentro del marco en vez
      de pegarse a los bordes de la ventana. */
-  body:not(.con-sesion) .app-frame {
+  .app-frame {
     transform: translateZ(0);
     position: relative;
     height: min(var(--frame-max-h), calc(100dvh - 56px));
@@ -120,7 +119,7 @@ input, select, textarea { font-size: 16px; }
   }
 
   /* Brillo superior sutil, como el bisel de un dispositivo */
-  body:not(.con-sesion) .app-frame::before {
+  .app-frame::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -131,14 +130,14 @@ input, select, textarea { font-size: 16px; }
   }
 
   /* El contenido pasa a desplazarse dentro del marco */
-  body:not(.con-sesion) #view-root {
+  #view-root {
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--ink-300, #d0c8b9) transparent;
   }
-  body:not(.con-sesion) #view-root::-webkit-scrollbar { width: 8px; }
-  body:not(.con-sesion) #view-root::-webkit-scrollbar-thumb {
+  #view-root::-webkit-scrollbar { width: 8px; }
+  #view-root::-webkit-scrollbar-thumb {
     background: var(--ink-200);
     border-radius: 99px;
     border: 2px solid transparent;
@@ -146,81 +145,14 @@ input, select, textarea { font-size: 16px; }
   }
 
   /* En escritorio no hay notch: recupera el espacio de las safe-areas */
-  body:not(.con-sesion) .app-frame .nav-safe { padding-bottom: .5rem; }
-  body:not(.con-sesion) #app-header > div:first-child { padding-top: .75rem; }
-
-  /* --- CON SESIÓN · aplicación a ancho completo -------------------------- */
-  /* El fondo oscuro y la marca de agua son del acceso; aquí estorban. */
-  body.con-sesion { background: var(--cream-100); }
-  body.con-sesion.app-bg { background: var(--cream-100); }
-  body.con-sesion .app-bg::after { display: none; }
-  body.con-sesion .app-watermark { display: none; }
-
-  /* Sin `transform` ni `overflow` en el marco: los descendientes
-     `position: fixed` vuelven a anclarse a la ventana, que es lo que
-     queremos en escritorio. Ver el aviso del plan sobre este punto. */
-  body.con-sesion .app-frame {
-    max-width: none;
-    transform: none;
-    height: auto;
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-  body.con-sesion .app-frame::before { display: none; }
+  .app-frame .nav-safe { padding-bottom: .5rem; }
+  #app-header > div:first-child { padding-top: .75rem; }
 }
 
 /* Pantallas muy bajas: que el marco no se coma la interfaz */
 @media (min-width: 900px) and (max-height: 720px) {
-  body:not(.con-sesion) .app-shell { padding: 12px; }
-  body:not(.con-sesion) .app-frame { height: calc(100dvh - 24px); border-radius: 22px; }
-}
-
-/* --- ≥1024 px · barra lateral ------------------------------------------- */
-.side-nav { display: none; }
-
-@media (min-width: 1024px) {
-  body.con-sesion .app-shell {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    min-height: 100dvh;
-  }
-
-  body.con-sesion .side-nav {
-    display: block;
-    position: sticky;
-    top: 0;
-    align-self: start;
-    height: 100dvh;
-    border-right: 1px solid var(--ink-200);
-    background: #fff;
-  }
-
-  /* La barra inferior sobra: sus secciones están ya en el lateral. */
-  body.con-sesion #bottom-nav { display: none !important; }
-  /* …y con ella sobra el hueco que se le reservaba. */
-  body.con-sesion #view-root.pb-28 { padding-bottom: 1.5rem; }
-}
-
-/* Estados de la barra lateral */
-.nav-side { color: var(--ink-500); }
-.nav-side:hover { background: var(--ink-100); color: var(--ink-900); }
-.nav-side[aria-current="page"] { background: var(--brand-100); color: var(--brand-700); }
-
-/* ==========================================================================
-   Contenedor de contenido
-   En móvil es transparente: no aporta ancho ni márgenes, para que las vistas
-   queden exactamente como estaban. A partir de 900 px pone el tope de ancho.
-   ========================================================================== */
-.view-container { width: 100%; }
-
-@media (min-width: 900px) {
-  body.con-sesion .view-container {
-    max-width: 1600px;
-    margin-inline: auto;
-    padding-inline: 1rem;
-  }
+  .app-shell { padding: 12px; }
+  .app-frame { height: calc(100dvh - 24px); border-radius: 22px; }
 }
 
 /* ==========================================================================
@@ -336,25 +268,3 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand-600); }
   .app-frame::before { display: none !important; }
   #view-root { overflow: visible !important; padding-bottom: 0 !important; }
 }
-/* Agenda mensual y estadísticas */
-.agenda-celebrations{display:grid;gap:6px;margin-bottom:12px}.agenda-birthday,.agenda-birthday-mark{background:#fce7f3;color:#9d174d;border-radius:6px;padding:4px 6px;font-size:12px}.agenda-holiday,.agenda-holiday-mark{background:#fff7ed;color:#9a3412;border-radius:6px;padding:4px 6px;font-size:12px}.agenda-holiday small{display:block;font-weight:700}.agenda-birthday-mark,.agenda-holiday-mark{font-size:10px;line-height:1.4}.agenda-holiday-mark{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.birthday-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;margin-top:8px}.birthday-row small{display:block;margin-top:4px}.agenda-celebrations a:hover{text-decoration:underline}@media(max-width:600px){.agenda-holiday-mark span{display:none}.agenda-holiday-mark,.agenda-birthday-mark{font-size:9px;padding:2px}.agenda-cell{min-height:92px}}
-.agenda-day-details{display:grid;gap:14px}.agenda-appointment{border:1px solid #dce4e9;border-radius:16px;padding:18px;background:#fff}.agenda-appointment h3{font-size:18px;font-weight:800;color:#243447}.agenda-appointment p{font-size:13px;color:#617184;margin-top:8px}.agenda-appointment .agenda-notes{white-space:pre-wrap;background:#f1f5f9;border-radius:8px;padding:10px}.agenda-detail-action{margin-top:14px;padding:8px 12px;border-radius:9px;background:#e0f2fe;color:#0369a1;font-size:13px;font-weight:700}
-.agenda-panel{background:#fff;border:1px solid #dce4e9;border-radius:18px;padding:16px;min-width:0}
-.agenda-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
-.agenda-toolbar h2{font-weight:800;text-transform:capitalize;color:#243447}
-.agenda-toolbar>div{display:flex;gap:6px}.agenda-toolbar a,.agenda-toolbar select,.agenda-toolbar input{border:1px solid #dce4e9;border-radius:9px;padding:6px 10px;background:#fff}
-.agenda-toolbar label{font-size:12px;display:flex;gap:8px;align-items:center}
-.agenda-week,.agenda-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
-.agenda-week{text-align:center;font-size:12px;font-weight:700;color:#617184;padding:8px 0}
-.agenda-grid{border-top:1px solid #e5eaef;border-left:1px solid #e5eaef}
-.agenda-cell{min-height:115px;min-width:0;border-right:1px solid #e5eaef;border-bottom:1px solid #e5eaef;padding:6px;display:flex;flex-direction:column;gap:4px}
-.agenda-cell:hover{background:#f0fdf4}.agenda-cell:focus-visible{outline:3px solid #15803d;outline-offset:-3px}.agenda-muted{background:#f7f9fb;color:#94a3b8}.agenda-selected,.agenda-selected:hover{background:#e8f5ed;box-shadow:inset 0 0 0 2px #86b89a}
-.agenda-day{width:26px;height:26px;display:grid;place-items:center;font-size:12px;font-weight:700;border-radius:50%}.agenda-today{background:#43413c;color:white}
-.agenda-event{font-size:11px;background:#dbeafe;color:#1e40af;border-radius:5px;padding:3px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.agenda-cancelada{background:#fee2e2;color:#991b1b}.agenda-completada{background:#dcfce7;color:#166534}.agenda-count{font-size:10px;font-weight:700;color:#52657b}
-.agenda-hint{font-size:12px;color:#617184;margin:12px 0;line-height:1.6}.agenda-add{background:#0284c7;color:white;border-radius:10px;padding:10px 14px;font-weight:700;font-size:13px}
-.agenda-total{font-size:18px;font-weight:800;margin:16px 0}.agenda-bars{display:grid;gap:10px;max-height:480px;overflow:auto}.agenda-bar-row{display:grid;grid-template-columns:125px minmax(0,1fr) 40px;align-items:center;gap:10px;font-size:12px}.agenda-track{height:22px;border-radius:5px;background:#f1f5f9;overflow:hidden}.agenda-bar{height:100%;background:linear-gradient(90deg,#0284c7,#38bdf8);border-radius:5px}.agenda-bar-row strong{text-align:right}
-@media(max-width:600px){.agenda-panel{padding:10px}.agenda-cell{min-height:76px;padding:3px;gap:2px}.agenda-event{display:none}.agenda-count{font-size:9px}.agenda-bar-row{grid-template-columns:108px minmax(0,1fr) 28px;gap:6px}.agenda-toolbar h2{font-size:14px}}
-.agenda-day-markers{display:grid;gap:5px;margin-top:2px}.agenda-marker{display:flex;align-items:center;gap:6px;min-width:0;border-radius:5px;padding:4px 6px;font-size:11px;line-height:1.4;font-weight:600}.agenda-marker>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.agenda-marker i{width:3px;min-height:12px;border-radius:3px;flex-shrink:0;align-self:stretch;background:currentColor}.agenda-marker-appointment{background:#e5effc;color:#285f9e}.agenda-marker-birthday{background:#fbe6f0;color:#a3326b}.agenda-marker-holiday{background:#fff0df;color:#a85d18}.agenda-marker-short{display:none}.agenda-legend{display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:16px;font-size:12px;color:#5b5852}.agenda-legend>span{display:inline-flex;align-items:center;gap:7px}.agenda-legend i{width:10px;height:10px;border-radius:50%;flex-shrink:0}.agenda-key-appointment{background:#4c85c5}.agenda-key-birthday{background:#d66a9f}.agenda-key-holiday{background:#e6a04e}.agenda-legend .agenda-key-selected{background:#e8f5ed;border:2px solid #86b89a;border-radius:3px}
-@media(max-width:600px){.agenda-cell{min-height:108px}.agenda-day-markers{gap:4px}.agenda-marker{padding:3px 2px;gap:3px;font-size:9px;border-radius:3px}.agenda-marker i{width:2px;min-height:10px}.agenda-marker-full{display:none}.agenda-marker-short{display:inline}.agenda-legend{gap:8px 14px;font-size:11px}}
-.agenda-marker-pending{background:#fbe3e4;color:#a1252e}.agenda-key-pending{background:#c94750}
-.agenda-toolbar .agenda-title{align-items:center;gap:8px}.agenda-help summary{display:grid;place-items:center;list-style:none;width:30px;height:30px;border:1px solid #e4e2dd;border-radius:50%;background:#faf9f7;color:#5b5852;font-size:14px;font-weight:800;cursor:pointer}.agenda-help summary::-webkit-details-marker{display:none}.agenda-help summary:hover,.agenda-help[open] summary{background:#fbe3e4;color:#921f23}.agenda-help summary:focus-visible{outline:2px solid #921f23;outline-offset:3px}.agenda-title{position:relative}.agenda-help-content{position:absolute;top:100%;left:0;z-index:30;width:360px;max-width:calc(100vw - 64px);margin-top:8px;padding:18px;border:1px solid #e4e2dd;border-radius:14px;background:#fff;box-shadow:0 12px 35px #1c1b1a26;font-size:13px;font-weight:400;max-height:60vh;overflow:auto}.agenda-help-content .agenda-legend{display:grid;gap:9px;margin-top:12px}.agenda-help-content a{text-decoration:underline}

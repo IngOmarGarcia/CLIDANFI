@@ -140,12 +140,7 @@
 
       const conNav = !ruta.def.sinNav;
       mostrarChrome(true, conNav);
-      // Un solo envoltorio para las 16 raíces de vista: el ancho de
-      // escritorio se resuelve aquí y no repitiendo clases en cada vista.
-      // Debe ser un div liso —sin `overflow`— o en móvil convertiría a
-      // #view-root en contenedor de scroll y las cabeceras `sticky` de las
-      // vistas dejarían de pegarse.
-      root.innerHTML = `<div class="view-container">${resultado.html}</div>`;
+      root.innerHTML = resultado.html;
       irArriba(root);
 
       pintarBarraContexto(resultado);
@@ -213,9 +208,6 @@
    * pero ocultan el menú inferior para no tapar la barra de guardar.
    */
   function mostrarChrome(visible, conNav = true) {
-    // Estado del shell. `con-sesion` es de lo que cuelga todo el layout de
-    // escritorio: sin ella, la pantalla de acceso conserva el marco oscuro.
-    document.body.classList.toggle('con-sesion', visible);
     document.getElementById('app-header').classList.toggle('hidden', !visible);
     document.getElementById('bottom-nav').classList.toggle('hidden', !visible || !conNav);
     // El hueco de pb-28 solo hace falta si el menú está a la vista; en las
@@ -247,30 +239,13 @@
       <p class="min-w-0 flex-1 truncate text-[14px] font-extrabold text-ink-900">${E(resultado.titulo || '')}</p>`;
   }
 
-  /**
-   * HTML de la lista de secciones. Una sola fuente para las dos
-   * presentaciones: barra inferior en móvil, barra lateral en escritorio.
-   * Es pura a propósito —no toca el DOM— para poder probarla sin navegador.
-   */
-  function navHTML(items, actual, variante) {
-    if (variante === 'lateral') {
-      return `
-        <nav class="flex flex-col gap-1 p-3" aria-label="Navegación principal">
-          ${items.map((it) => {
-            const on = actual === it.href;
-            return `
-              <a href="${it.href}" ${on ? 'aria-current="page"' : ''}
-                class="nav-side flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-bold transition">
-                <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg">${icon(it.icono, 'h-5 w-5')}</span>
-                <span class="truncate">${E(it.label)}</span>
-              </a>`;
-          }).join('')}
-        </nav>`;
-    }
+  function pintarNav() {
+    const nav = document.getElementById('bottom-nav');
+    const actual = '#' + estado.ruta.path;
 
-    return `
+    nav.innerHTML = `
       <div class="nav-safe flex items-stretch justify-around px-2 pt-2">
-        ${items.map((it) => {
+        ${NAV[rol()].map((it) => {
           const on = actual === it.href;
           return `
             <a href="${it.href}" class="nav-item flex flex-1 flex-col items-center gap-1 py-1" ${on ? 'aria-current="page"' : ''}>
@@ -279,14 +254,6 @@
             </a>`;
         }).join('')}
       </div>`;
-  }
-
-  function pintarNav() {
-    const actual = '#' + estado.ruta.path;
-    const items = NAV[rol()];
-    document.getElementById('bottom-nav').innerHTML = navHTML(items, actual, 'inferior');
-    const lado = document.getElementById('side-nav');
-    if (lado) lado.innerHTML = navHTML(items, actual, 'lateral');
   }
 
   /* ======================================================================
@@ -566,7 +533,6 @@
     'registrar-asistencia': (el) => VistaFisio.sheetAsistencia(el.dataset.id),
     'abrir-valoracion':     (el) => { location.hash = `#/t/valoracion/${el.dataset.id}`; },
     'nueva-nota':           (el) => VistaFisio.sheetNota(el.dataset.id),
-    'fecha-nota':           (el) => VistaFisio.sheetFechaNota(el.dataset.id, el.dataset.fecha),
     'ver-foto':             (el) => VistaFisio.sheetFoto(el.dataset.url, el.dataset.titulo),
     'ver-archivo':          (el) => VistaFisio.verArchivo(el.dataset.id),
 
@@ -801,8 +767,4 @@
     get rol() { return rol(); },
     get sesion() { return estado.sesion; }
   };
-
-  // Se expone solo para que scripts/test-navegacion.js pueda probarlo sin
-  // navegador. La aplicación usa navHTML() directamente, no por aquí.
-  global.AppNav = { navHTML };
 })(window);

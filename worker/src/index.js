@@ -28,7 +28,6 @@
    ========================================================================== */
 
 import { enviarPush } from './webpush.js';
-import { respaldarValoraciones } from './drive.js';
 import {
   crearCliente, citasEntre, suscripcionesDeFisios,
   apuntarAviso, bajaSuscripcion, marcarEnvioOk
@@ -42,7 +41,7 @@ import {
    buena parte del mundo. Se resuelve con `Intl`, que conoce las reglas de
    cada zona, en vez de restar horas a mano.
    -------------------------------------------------------------------------- */
-const zonaDe = (env) => env.TZ_CLINICA || 'America/Mexico_City';
+const zonaDe = (env) => env.TZ_CLINICA || 'America/Mazatlan';
 
 /** Hora (0-23) que marca el reloj de la clínica en este instante. */
 function horaLocal(fecha, zona) {
@@ -296,9 +295,6 @@ async function ejecutar(cron, env, forzar = false) {
 export default {
   /** Disparo automático por Cron Trigger. */
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(respaldarValoraciones(env)
-      .then(r => console.log('[drive]', JSON.stringify(r)))
-      .catch(e => console.error('[drive] ERROR:', e.message)));
     ctx.waitUntil(
       ejecutar(event.cron, env)
         .then((r) => console.log('[avisos]', JSON.stringify(r)))

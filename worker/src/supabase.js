@@ -18,7 +18,7 @@
  * No se usa `@supabase/supabase-js` a propósito: arrastra dependencias que
  * inflan el bundle del Worker y aquí solo hacen falta cuatro consultas.
  */
-export function crearCliente(env, solicitar = fetch) {
+export function crearCliente(env) {
   const base = String(env.SUPABASE_URL || '').replace(/\/+$/, '');
   const clave = env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -27,7 +27,7 @@ export function crearCliente(env, solicitar = fetch) {
   }
 
   const pedir = async (ruta, opciones = {}) => {
-    const res = await solicitar(`${base}/rest/v1/${ruta}`, {
+    const res = await fetch(`${base}/rest/v1/${ruta}`, {
       ...opciones,
       headers: {
         apikey: clave,
@@ -47,7 +47,6 @@ export function crearCliente(env, solicitar = fetch) {
   };
 
   return {
-    rpc: (nombre) => pedir(`rpc/${nombre}`, { method: 'POST', body: '{}' }),
     /** GET con filtros ya escritos en formato PostgREST. */
     select: (tabla, query) => pedir(`${tabla}?${query}`),
 

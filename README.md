@@ -174,7 +174,7 @@ npm run deploy
 ```
 
 Luego, en `worker/wrangler.toml`, rellena `SUPABASE_URL` y `VAPID_PUBLIC_KEY`, y ajusta
-`TZ_CLINICA` (por defecto `America/Mexico_City`, la zona Centro de Zacatecas), `HORA_RECORDATORIO` y `MINUTOS_ANTES`.
+`TZ_CLINICA` (por defecto `America/Mazatlan`), `HORA_RECORDATORIO` y `MINUTOS_ANTES`.
 
 **La `VAPID_PUBLIC_KEY` tiene que ser la misma** en `wrangler.toml` y en las variables de
 Cloudflare Pages. Si no coinciden, el navegador se suscribe con una clave y el Worker firma

@@ -119,12 +119,11 @@
       ]
     },
     {
-      key: 'antecedentes', titulo: 'Antecedentes', icono: 'heart', always: true,
+      key: 'antecedentes', titulo: 'Antecedentes', icono: 'heart',
       resumen: 'Patológicos, quirúrgicos y farmacológicos',
       campos: [
-        { key: 'patologicos', label: 'Antecedentes personales patológicos', type: 'checks',
+        { key: 'patologicos', label: 'Antecedentes patológicos', type: 'checks',
           options: ['Diabetes', 'Hipertensión', 'Cardiopatía', 'Osteoporosis', 'Artritis reumatoide', 'Tiroides', 'Epilepsia', 'Cáncer', 'Ninguno'] },
-        { key: 'patologicos_detalle', label: 'Detalle de antecedentes personales patológicos', type: 'textarea', placeholder: 'Padecimientos previos y actuales, fecha de diagnóstico, tratamiento y control' },
         { key: 'quirurgicos', label: 'Antecedentes quirúrgicos', type: 'textarea', placeholder: 'Cirugías previas y fechas' },
         { key: 'medicamentos', label: 'Medicamentos actuales', type: 'textarea' },
         { key: 'alergias', label: 'Alergias', type: 'text' },

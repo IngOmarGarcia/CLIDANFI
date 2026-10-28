@@ -608,36 +608,5 @@ const argsDe = (entrada, metodo) => (entrada.ops.find(([m]) => m === metodo) || 
   }
 
   console.log(`\n${'─'.repeat(60)}\n${pasan} pasan · ${fallan} fallan\n`);
-  {
-    const { API, registro } = montarAPI({ respuestas: {
-      perfiles: PERFIL_FISIO,
-      valoraciones: { data: { id: 'v1' }, error: null },
-      valoraciones_versiones: { data: [{ id: 'version-septiembre' }], error: null }
-    } });
-    await API.guardarValoracion('p1', { id: 'v1', secciones_activas: [], datos: {} });
-    const edit = ultima(registro, 'valoraciones', 'update');
-    check(edit.ops.some(([m, a]) => m === 'eq' && a[0] === 'paciente_id' && a[1] === 'p1'),
-      'editar valoración exige que pertenezca al paciente indicado');
-    const historial = await API.historialValoraciones('p1');
-    check(historial.length === 1, 'se leen versiones históricas sin filtro de mes');
-    const consulta = registro.find(r => r.tabla === 'valoraciones_versiones');
-    check(!consulta.ops.some(([m]) => m === 'gte' || m === 'lte'), 'el historial no excluye meses anteriores');
-  }
-  {
-    const { API, registro } = montarAPI({ respuestas: { perfiles: PERFIL_FISIO, notas: { data: { id: 'n1' }, error: null } } });
-    await API.crearNota({ paciente_id: 'p1', texto: 'Sesión previa', fecha_nota: '2026-09-15T16:30:00Z',
-      signos_vitales: { ta: '120 / 80', tem: '36.5', fc: '72', fr: '18' } });
-    const fila = argsDe(ultima(registro, 'notas', 'insert'), 'insert');
-    check(fila.fecha_nota === '2026-09-15T16:30:00.000Z' && !('creado_en' in fila), 'la fecha de atención no reemplaza la fecha de captura');
-    check(fila.signos_vitales.ta === '120/80' && fila.signos_vitales.tem === 36.5 && fila.signos_vitales.fc === 72 && fila.signos_vitales.fr === 18, 'se guardan los cuatro signos vitales con sus valores');
-    await API.cambiarFechaNota('n1', '2026-09-14T10:00:00Z');
-    const edicion = argsDe(ultima(registro, 'notas', 'update'), 'update');
-    check(Object.keys(edicion).join() === 'fecha_nota', 'corregir la fecha conserva texto, signos, adjuntos y fecha de captura');
-    for (const cambios of [{ fecha_nota: 'inválida' }, { signos_vitales: { fc: -1 } }, { signos_vitales: { ta: 'error' } }]) {
-      let fallo = false;
-      try { await API.crearNota({ paciente_id: 'p1', texto: 'No guardar', ...cambios }); } catch { fallo = true; }
-      check(fallo, 'se rechazan fechas o signos inválidos antes de guardar');
-    }
-  }
   process.exit(fallan ? 1 : 0);
 })();
