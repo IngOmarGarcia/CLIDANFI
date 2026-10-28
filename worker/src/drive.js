@@ -2,6 +2,8 @@
 import { crearCliente } from './supabase.js';
 import { generarValoracionPdf } from './valoracion-pdf.js';
 import { prepararDocumento, adjuntosDocumento } from './documentos.js';
+import { carpetaPaciente, propiedadesPaciente, ubicarArchivo, organizarRespaldos } from './drive-folders.js';
+import { respaldarInformesCitas } from './informes-citas.js';
 
 const secretos = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'];
 class ContinuarLuego extends Error {}
@@ -38,11 +40,12 @@ async function identificarEdicion(db, version) {
   return { ...version, actualizado: !!primeras[0] && primeras[0].id !== version.id };
 }
 
-async function subirPdf(version, headers, env, archivoId = null, red = globalThis) {
+async function subirPdf(version, headers, env, archivoId = null, red = globalThis, carpeta = null) {
   const metadata = {
     name: nombreRespaldo(version), mimeType: 'application/pdf',
-    appProperties: { clidanfi_version: version.id, clidanfi_nombre: formatoNombre },
-    ...(!archivoId && env.GOOGLE_DRIVE_FOLDER_ID ? { parents: [env.GOOGLE_DRIVE_FOLDER_ID] } : {})
+    appProperties: { clidanfi_version: version.id, clidanfi_nombre: formatoNombre,
+      ...(carpeta ? propiedadesPaciente(version) : {}) },
+    ...(!archivoId && carpeta ? { parents: [carpeta] } : {})
   };
   const boundary = `clidanfi_${crypto.randomUUID()}`;
   const bytes = await generarValoracionPdf(version);
@@ -139,14 +142,16 @@ export async function respaldarValoraciones(env) {
       // Recupera una subida previa si se perdió la respuesta o falló Supabase.
       const query = new URLSearchParams({
         q: `trashed = false and appProperties has { key='clidanfi_version' and value='${version.id}' }`,
-        fields: 'files(id,mimeType)', pageSize: '1'
+        fields: 'files(id,mimeType,parents,appProperties)', pageSize: '1'
       });
       const existentes = await requerido(await red.fetch(
         `https://www.googleapis.com/drive/v3/files?${query}`, { headers }
       ), 'Buscar respaldo');
       let archivo = existentes.files?.[0];
+      const carpeta = await carpetaPaciente(version, db, headers, env, red);
+      if (archivo) await ubicarArchivo(archivo, carpeta, version, headers, red);
       if (!archivo || archivo.mimeType !== 'application/pdf') {
-        archivo = await subirPdf(version, headers, env, archivo?.id, red);
+        archivo = await subirPdf(version, headers, env, archivo?.id, red, carpeta);
       }
       if (!archivo.id) throw new Error('Drive no devolvió identificador del respaldo');
       await db.update('valoraciones_versiones', filtro, {
@@ -168,11 +173,17 @@ export async function respaldarValoraciones(env) {
   let documentos;
   try { documentos = red.usadas < 30 ? await respaldarDocumentos(db, headers, env, red) : { diferidos: true }; }
   catch (error) { documentos = { error: String(error.message).slice(0, 200) }; }
+  let carpetas;
+  try { carpetas = red.usadas < 14 ? await organizarRespaldos(db, headers, env, red) : { diferidos: true }; }
+  catch (error) { carpetas = { error: String(error.message).slice(0, 200) }; }
+  let informes;
+  try { informes = red.usadas < 18 ? await respaldarInformesCitas(db, headers, env, red) : { diferidos: true }; }
+  catch (error) { informes = { error: String(error.message).slice(0, 200) }; }
   const restantes = (antiguos.files || []).filter(a => (a.appProperties?.clidanfi_version || a.appProperties?.clidanfi_documento)
     && !red.citasExcluidas?.has(a.id)).length
     - convertidos - renombrados;
   return { guardados, fallidos, convertidos, conversionesFallidas, renombrados,
-    renombres_pendientes: antiguos.nextPageToken ? null : restantes, citas, documentos };
+    renombres_pendientes: antiguos.nextPageToken ? null : restantes, citas, documentos, carpetas, informes };
 }
 
 // Solo elimina COPIAS de citas y sus entradas de la cola; nunca la agenda.
@@ -199,16 +210,17 @@ export async function retirarRespaldosCitas(db, headers, red = { fetch: (...args
   return { retiradas, fallidas, pendientes: versiones.length - retiradas };
 }
 
-async function subirDocumento(version, headers, env, adjunto = null, red = globalThis, cache = new Map()) {
+async function subirDocumento(version, headers, env, adjunto = null, red = globalThis, cache = new Map(), carpeta) {
   const clave = `${version.id}:${adjunto?.clave || 'pdf'}`;
   if (cache.has(clave)) return cache.get(clave);
   comprobarPresupuesto(red);
   const query = new URLSearchParams({
     q: `trashed = false and appProperties has { key='clidanfi_documento' and value='${clave}' }`,
-    fields: 'files(id)', pageSize: '1'
+    fields: 'files(id,parents,appProperties)', pageSize: '1'
   });
   const anteriores = await requerido(await red.fetch(`https://www.googleapis.com/drive/v3/files?${query}`, { headers }), 'Buscar documento');
   if (anteriores.files?.[0]?.id) {
+    await ubicarArchivo(anteriores.files[0], carpeta, version, headers, red);
     cache.set(clave, anteriores.files[0].id);
     return anteriores.files[0].id;
   }
@@ -226,8 +238,8 @@ async function subirDocumento(version, headers, env, adjunto = null, red = globa
     mime = response.headers.get('Content-Type') || adjunto.mime || 'application/octet-stream';
   } else bytes = await generarValoracionPdf(prepararDocumento(version));
   const metadata = { name: nombreRespaldo(version, adjunto), mimeType: mime,
-    appProperties: { clidanfi_documento: clave, clidanfi_lote: version.id, clidanfi_nombre: formatoNombre },
-    ...(env.GOOGLE_DRIVE_FOLDER_ID ? { parents: [env.GOOGLE_DRIVE_FOLDER_ID] } : {}) };
+    appProperties: { clidanfi_documento: clave, clidanfi_lote: version.id, clidanfi_nombre: formatoNombre,
+      ...propiedadesPaciente(version) }, parents: [carpeta] };
   const boundary = `clidanfi_${crypto.randomUUID()}`;
   const body = new Blob([
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
@@ -253,6 +265,7 @@ export async function respaldarDocumentos(db, headers, env, red = globalThis) {
     }
     try {
       comprobarPresupuesto(red);
+      const carpeta = await carpetaPaciente(version, db, headers, env, red);
       // Recuperar todos los adjuntos de este intento en una consulta. Una nota
       // con muchas fotos debe poder avanzar entre tandas, sin gastar su cupo
       // volviendo a consultar cada foto que ya se subió.
@@ -262,17 +275,21 @@ export async function respaldarDocumentos(db, headers, env, red = globalThis) {
         comprobarPresupuesto(red);
         const query = new URLSearchParams({
           q: `trashed = false and appProperties has { key='clidanfi_lote' and value='${version.id}' }`,
-          fields: 'files(id,appProperties),nextPageToken', pageSize: '1000',
+          fields: 'files(id,parents,appProperties),nextPageToken', pageSize: '1000',
           ...(pagina ? { pageToken: pagina } : {})
         });
         const lote = await requerido(await red.fetch(`https://www.googleapis.com/drive/v3/files?${query}`, { headers }), 'Buscar adjuntos respaldados');
-        for (const a of lote.files || []) cache.set(a.appProperties?.clidanfi_documento, a.id);
+        for (const a of lote.files || []) {
+          comprobarPresupuesto(red);
+          await ubicarArchivo(a, carpeta, version, headers, red);
+          cache.set(a.appProperties?.clidanfi_documento, a.id);
+        }
         pagina = lote.nextPageToken;
       } while (pagina);
       let id;
-      if (version.origen !== 'archivos') id = await subirDocumento(version, headers, env, null, red, cache);
+      if (version.origen !== 'archivos') id = await subirDocumento(version, headers, env, null, red, cache, carpeta);
       for (const adjunto of adjuntosDocumento(version)) {
-        const adjuntoId = await subirDocumento(version, headers, env, adjunto, red, cache);
+        const adjuntoId = await subirDocumento(version, headers, env, adjunto, red, cache, carpeta);
         if (!id) id = adjuntoId;
       }
       if (!id) throw new Error('Documento sin archivo para respaldar');

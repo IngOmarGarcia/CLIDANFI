@@ -9,6 +9,7 @@
    ========================================================================== */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const RAIZ = path.join(__dirname, '..');
@@ -65,6 +66,19 @@ const copiar = (rel) => {
 // su propia carpeta hacia abajo, así que desde /js/ no podría gobernar el
 // sitio entero ni atender las notificaciones.
 ['index.html', 'sw.js', 'css', 'js', 'assets', '_headers', '_redirects', 'robots.txt'].forEach(copiar);
+
+// Cada script y hoja de estilos lleva la versión de su contenido en la URL.
+// Un navegador con CSS antiguo guardado debe pedir la nueva URL al publicar.
+const htmlRuta = path.join(DIST, 'index.html');
+const htmlVersionado = fs.readFileSync(htmlRuta, 'utf8').replace(
+  /\b(src|href)="(\.\/(?:js|css)\/[^"?]+\.(?:js|css))"/g,
+  (_match, atributo, url) => {
+    const archivo = path.join(DIST, url.slice(2));
+    const version = crypto.createHash('sha256').update(fs.readFileSync(archivo)).digest('hex').slice(0, 12);
+    return `${atributo}="${url}?v=${version}"`;
+  }
+);
+fs.writeFileSync(htmlRuta, htmlVersionado);
 
 /* --- 4 · verificaciones de salida ----------------------------------------- */
 const problemas = [];

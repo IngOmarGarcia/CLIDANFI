@@ -4,6 +4,7 @@ import { PDFDocument } from 'pdf-lib';
 import { prepararDocumento, adjuntosDocumento, tiposDocumento } from '../src/documentos.js';
 import { respaldarDocumentos, nombreRespaldo, retirarRespaldosCitas } from '../src/drive.js';
 import { generarValoracionPdf } from '../src/valoracion-pdf.js';
+import { conCarpetas } from './drive-mock.js';
 
 const base = { id: '11111111-1111-4111-8111-111111111111', documento_id: 'nota',
   paciente_id: 'paciente', paciente_nombre: 'Omar García', bloqueo: 'lease', numero: 1,
@@ -81,6 +82,8 @@ test('reintenta solo los adjuntos faltantes, copia bytes originales y no consume
       if (url.includes('/upload/')) {
         const body = await options.body.text();
         const metadata = JSON.parse(body.split('\r\n\r\n')[1].split('\r\n')[0]);
+        assert.deepEqual(metadata.parents, ['carpeta-paciente']);
+        assert.equal(metadata.appProperties.clidanfi_paciente, 'paciente');
         assert.ok(metadata.name.startsWith(metadata.mimeType === 'image/jpeg' ? 'Evid. Omar García' : 'Evol. Omar García'));
         if (metadata.mimeType === 'image/jpeg') assert.ok(body.includes('\u0001\u0002\u0003'));
         else assert.ok(body.includes('%PDF-'));
@@ -91,6 +94,7 @@ test('reintenta solo los adjuntos faltantes, copia bytes originales y no consume
       throw new Error('Solicitud inesperada: ' + url);
     };
     const env = { SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'service' };
+    globalThis.fetch = conCarpetas(globalThis.fetch);
     assert.deepEqual(await respaldarDocumentos(db, {}, env), { guardados: 0, fallidos: 1 });
     assert.match(cambios[0][2].ultimo_error, /503/);
     assert.equal(cambios[0][2].drive_archivo_id, undefined);
@@ -114,6 +118,7 @@ test('un archivo de otro paciente no se solicita ni se marca como respaldado', a
       assert.ok(String(url).includes('/drive/v3/files?'));
       return Response.json({ files: [] });
     };
+    globalThis.fetch = conCarpetas(globalThis.fetch);
     const db = { rpc: async () => [{ ...nota, origen: 'archivos', contenido: { ruta: 'otro/archivo.pdf' } }],
       update: async (tabla, filtro, valores) => { cambio = valores; } };
     assert.deepEqual(await respaldarDocumentos(db, {}, {}), { guardados: 0, fallidos: 1 });
@@ -144,6 +149,7 @@ test('respaldos con muchas fotos avanzan entre tandas sin agotar las subpeticion
       if (url.includes('/upload/')) {
         const body = await opts.body.text();
         const metadata = JSON.parse(body.split('\r\n\r\n')[1].split('\r\n')[0]);
+        assert.deepEqual(metadata.parents, ['carpeta-paciente']);
         const id = `drive-${++subidas}`;
         archivos.set(metadata.appProperties.clidanfi_documento, { id, appProperties: metadata.appProperties });
         return Response.json({ id });
@@ -158,6 +164,7 @@ test('respaldos con muchas fotos avanzan entre tandas sin agotar las subpeticion
       if (url.includes('/storage/v1/')) return new Response(new Uint8Array([1]), { headers: { 'Content-Type': 'image/jpeg' } });
       throw new Error('Petición inesperada');
     };
+    globalThis.fetch = conCarpetas(globalThis.fetch);
     for (let intento = 0; intento < 12 && completadas < 10; intento++) {
       red = { usadas: 0, fetch: (...args) => { red.usadas++; return fetch(...args); } };
       const resultado = await respaldarDocumentos(db, {}, { SUPABASE_URL: 'https://test.supabase.co' }, red);

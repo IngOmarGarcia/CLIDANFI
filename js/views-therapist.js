@@ -604,6 +604,36 @@
       onMount(root) { root.querySelector('#cumple-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = `#/t/agenda?f=cumpleanos&m=${e.target.value}`; }); }
     };
   }
+  function montarGraficaCitas(root, citas, prefijo, mesInicial, detallePacientes = false, identidad = '') {
+    const escala = root.querySelector(`#${prefijo}-escala`);
+    const grafica = root.querySelector(`#${prefijo}-grafica`);
+    const periodo = root.querySelector(`#${prefijo}-periodo`);
+    const pintar = () => {
+      const mes = periodo?.value ? `${periodo.value}-01` : mesInicial;
+      if (periodo) periodo.disabled = escala.value === 'ano';
+      const grupos = EstadisticasCitas.agrupar(citas, escala.value, mes);
+      const max = Math.max(1, ...grupos.map(g => g.total));
+      const total = grupos.reduce((n, g) => n + g.total, 0);
+      grafica.innerHTML = `<p class="agenda-total">${total} cita${total === 1 ? '' : 's'} completada${total === 1 ? '' : 's'} en el periodo</p><div class="agenda-bars">${grupos.map((g, i) => {
+        const contenido = `<span>${E(g.etiqueta)}</span><span class="agenda-track motion-meter" data-motion-key="${E(`${prefijo}:${identidad}:${mes}:${escala.value}:${g.clave}`)}"><span class="agenda-bar motion-meter-fill" style="display:block;width:${g.total / max * 100}%"></span></span><strong>${g.total}</strong>`;
+        return detallePacientes ? `<button type="button" class="agenda-bar-row agenda-stat-button" data-estadistica="${i}" aria-label="Ver pacientes de ${E(g.etiqueta)}: ${g.total} citas completadas">${contenido}</button>` : `<div class="agenda-bar-row">${contenido}</div>`;
+      }).join('')}</div>${total ? '' : '<p class="agenda-hint">No hay citas completadas en este periodo.</p>'}`;
+      if (detallePacientes) grafica.querySelectorAll('[data-estadistica]').forEach(b => b.addEventListener('click', () => {
+        const g = grupos[Number(b.dataset.estadistica)], pacientes = EstadisticasCitas.pacientes(g.citas).sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre, 'es'));
+        const mayor = Math.max(1, ...pacientes.map(p => p.total));
+        openSheet({ title: g.etiqueta, subtitle: `${g.total} cita${g.total === 1 ? '' : 's'} completada${g.total === 1 ? '' : 's'} · ${pacientes.length} paciente${pacientes.length === 1 ? '' : 's'}`, size: 'tall',
+          body: `<div class="patient-session-list">${pacientes.length ? pacientes.map(p => {
+            const tag = p.id ? 'a' : 'div';
+            return `<${tag} class="patient-session-row" ${p.id ? `href="#/t/paciente/${E(p.id)}"` : ''} aria-label="${E(p.nombre)}: ${p.total} sesiones completadas"><span class="patient-session-meter motion-meter" data-motion-key="${E(`lista:${escala.value}:${g.desde}:${g.hasta}:${p.id || p.nombre}`)}"><span class="patient-session-fill motion-meter-fill" style="width:${p.total / mayor * 100}%"></span><span class="patient-session-name">${E(p.nombre)}</span></span><span class="patient-session-count"><strong>${p.total}</strong><small>sesión${p.total === 1 ? '' : 'es'}</small></span></${tag}>`;
+          }).join('') : '<p>Sin pacientes con citas completadas en este periodo.</p>'}</div>`,
+          onMount(sheet) { sheet.querySelectorAll('a').forEach(a => a.addEventListener('click', closeSheet)); } });
+      }));
+    };
+    escala.addEventListener('change', pintar);
+    periodo?.addEventListener('change', pintar);
+    pintar();
+  }
+
   async function calendarioAgenda(query) {
     const [citas, pacientes] = await Promise.all([API.historialCitas(), API.pacientesCumpleanos()]);
     const hoy = CalendarioEventos.hoyCentro();
@@ -663,7 +693,7 @@
       </section>
       <section class="agenda-panel"><div class="agenda-toolbar"><div class="agenda-title"><h2>Estadísticas de citas</h2>
         <details class="agenda-help"><summary aria-label="Ayuda de estadísticas de citas">?</summary><div class="agenda-help-content">
-          <p class="agenda-hint">Conteo por fecha de la cita, incluyendo todos los estados. Año muestra el historial completo; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas comienzan en lunes y cuentan solo los días del mes elegido.</p>
+          <p class="agenda-hint">Solo citas completadas, por fecha de atención en la zona de la clínica. Año muestra el historial; mes, el año seleccionado; semana y día, el mes seleccionado. Las semanas empiezan en lunes. Pulsa una barra para ver los pacientes del periodo.</p>
         </div></details></div>
         <label>Agrupar por <select id="agenda-escala"><option value="mes">Mes</option><option value="ano">Año</option><option value="semana">Semana</option><option value="dia">Día</option></select></label></div>
         <div id="agenda-grafica" aria-live="polite"></div>
@@ -696,49 +726,7 @@
         }));
         root.querySelector('#agenda-mes').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) location.hash = enlace(e.target.value); });
         root.querySelector('#agenda-agregar')?.addEventListener('click', () => sheetCita(null, null, seleccionado));
-        const escala = root.querySelector('#agenda-escala');
-        const pintar = () => {
-          const tipo = escala.value, buckets = new Map();
-          const clave = fecha => {
-            if (tipo === 'ano') return fecha.slice(0, 4);
-            if (tipo === 'mes') return fecha.slice(0, 7);
-            if (tipo === 'dia') return fecha;
-            const d = new Date(`${fecha}T12:00:00`); d.setDate(d.getDate() - (d.getDay() + 6) % 7);
-            return isoDay(d);
-          };
-          if (tipo === 'ano') {
-            const anos = citas.map(c => Number(isoDay(c.inicia_en).slice(0, 4)));
-            const fin = Math.max(Number(mes.slice(0, 4)), ...anos);
-            const ini = Math.min(Number(mes.slice(0, 4)), ...anos);
-            for (let a = ini; a <= fin; a++) buckets.set(String(a), 0);
-          } else if (tipo === 'mes') {
-            for (let m = 1; m <= 12; m++) buckets.set(`${mes.slice(0, 4)}-${String(m).padStart(2, '0')}`, 0);
-          } else {
-            const d = new Date(inicio);
-            while (isoDay(d).startsWith(mes)) { buckets.set(clave(isoDay(d)), 0); d.setDate(d.getDate() + 1); }
-          }
-          citas.forEach(c => {
-            const fecha = isoDay(c.inicia_en);
-            if (tipo === 'mes' && !fecha.startsWith(mes.slice(0, 4))) return;
-            if ((tipo === 'dia' || tipo === 'semana') && !fecha.startsWith(mes)) return;
-            const k = clave(fecha); buckets.set(k, (buckets.get(k) || 0) + 1);
-          });
-          const max = Math.max(1, ...buckets.values());
-          const etiqueta = k => {
-            if (tipo === 'ano') return k;
-            const d = new Date(`${k}${tipo === 'mes' ? '-01' : ''}T12:00:00`);
-            if (tipo === 'mes') return d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).replace(' de ', ' ');
-            if (tipo === 'dia') return `${String(d.getDate()).padStart(2, '0')} ${d.toLocaleDateString('es-MX', { month: 'long' })}`;
-            const fin = new Date(d); fin.setDate(fin.getDate() + 6);
-            const desde = k < `${mes}-01` ? new Date(inicio) : d;
-            const ultimo = new Date(inicio); ultimo.setMonth(ultimo.getMonth() + 1, 0);
-            const hasta = fin > ultimo ? ultimo : fin;
-            return `${String(desde.getDate()).padStart(2, '0')}–${String(hasta.getDate()).padStart(2, '0')} ${hasta.toLocaleDateString('es-MX', { month: 'long' })}`;
-          };
-          const total = [...buckets.values()].reduce((a, b) => a + b, 0);
-          root.querySelector('#agenda-grafica').innerHTML = `<p class="agenda-total">${total} citas en el periodo</p><div class="agenda-bars" role="list" aria-label="Cantidad de citas por ${E(escala.selectedOptions[0].text)}">${[...buckets].map(([k, n]) => `<div class="agenda-bar-row" role="listitem"><span>${E(etiqueta(k))}</span><div class="agenda-track"><div class="agenda-bar" style="width:${n / max * 100}%"></div></div><strong>${n}</strong></div>`).join('')}</div>${total ? '' : '<p class="agenda-hint">No hay citas registradas en este periodo.</p>'}`;
-        };
-        escala.addEventListener('change', pintar); pintar();
+        montarGraficaCitas(root, citas, 'agenda', mes, true);
       }
     };
   }
@@ -905,11 +893,18 @@
         class="shrink-0 rounded-xl px-3.5 py-2 text-[12.5px] font-bold transition
         ${tab === k ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-ink-600 border border-ink-200'}">${E(label)}</a>`).join('');
 
+    const datosResumen = tab === 'resumen' ? await Promise.all([
+      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
+      API.cumplimientoDePaciente(p.id)
+    ]) : null;
+    const sesiones = datosResumen ? Store.sesionesTratamiento(datosResumen[0]) : null;
+    const paqueteActivo = total > usadas && (!p.paquete_vence || isoDay(p.paquete_vence) >= isoDay(new Date()));
+
     const contenido =
       tab === 'valoracion' ? await tabValoracion(p) :
       tab === 'historial'  ? await tabHistorial(p)  :
       tab === 'rutinas'    ? await tabRutinas(p)    :
-                             await tabResumen(p);
+                             await tabResumen(p, datosResumen);
 
     /* Corrección de rejilla (xl): la tarjeta de resumen (paquete de sesiones)
        solo existe en la pestaña «Resumen» —es la única con algo que fijar en
@@ -918,7 +913,7 @@
        ocupa las dos columnas él solo (`xl:col-span-2`), tal como se veía
        antes de este ajuste. Así la rejilla nunca reparte los hermanos de una
        pestaña fila a fila entre las dos columnas. */
-    const tarjetaResumen = tab === 'resumen' ? tarjetaResumenPaquete(p, { usadas, total, pct }) : '';
+    const tarjetaResumen = tab === 'resumen' ? tarjetaResumenPaquete(p, { usadas, total, pct, paqueteActivo, sesiones }) : '';
 
     /* Alta exprés sin historia clínica: el aviso va en TODAS las pestañas, no
        solo en el resumen, porque el hueco que deja se nota justo cuando se
@@ -999,6 +994,7 @@
     const onMount = (root) => {
       const entrada = root.querySelector('#f-exp-archivo');
       if (entrada) entrada.addEventListener('change', (e) => subirArchivosExpediente(id, e.target));
+      if (tab === 'resumen') montarGraficaCitas(root, datosResumen[2], 'paciente', EstadisticasCitas.dia(new Date()).slice(0, 7), false, id);
     };
 
     return { titulo: p.nombre, html, onMount, volver: '#/t/pacientes' };
@@ -1014,8 +1010,8 @@
    * cuando `tab === 'resumen'`, así que en móvil y en las otras pestañas
    * no cambia nada.
    */
-  const tarjetaResumenPaquete = (p, { usadas, total, pct }) =>
-    total > 0 ? card(`
+  const tarjetaResumenPaquete = (p, { usadas, total, pct, paqueteActivo, sesiones }) =>
+    paqueteActivo ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
           ${badge(p.paquete_restantes === 0 ? 'Agotado' : `${p.paquete_restantes} restantes`, p.paquete_restantes === 0 ? 'rose' : p.paquete_restantes <= 2 ? 'amber' : 'green')}
@@ -1029,25 +1025,31 @@
           <span>${p.paquete_vence ? `Vence ${E(fmtDate(p.paquete_vence))}` : 'Sin vigencia'}</span>
         </div>
       `, 'xl:sticky xl:top-4') : card(`
-        <!-- Sin paquete no se pinta una barra al 0 %: parecería un paquete
-             agotado, que es lo contrario de «paga por sesión». -->
-        <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Paquete de sesiones</p>
-        <p class="mt-1 text-[13.5px] font-bold text-ink-700">Sin paquete · paga por sesión</p>
+        <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Sesiones del tratamiento</p>
+        <p class="mt-2 text-[24px] font-extrabold text-brand-700">${sesiones.numero ? `Sesión #${sesiones.numero}` : 'Sin sesiones en este periodo'}</p>
+        <p class="mt-1 text-[12px] font-bold text-ink-500">Sin paquete activo · paga por sesión</p>
+        ${sesiones.inicio ? `<p class="mt-2 text-[12px] text-ink-600">Desde ${E(fmtDate(sesiones.inicio))}</p>` : ''}
+        <p class="mt-2 text-[11.5px] leading-snug text-ink-500">${sesiones.reiniciado ? 'Conteo reiniciado por una pausa de 30 días. La próxima asistencia será la sesión #1.' : 'Cuenta las asistencias registradas. Una pausa de 30 días inicia un nuevo conteo.'}</p>
         <button data-action="editar-paciente" data-id="${p.id}"
           class="mt-2 rounded-xl bg-ink-100 px-3 py-1.5 text-[12px] font-bold text-ink-600 active:scale-95">
           Contratar un paquete
         </button>
       `, 'xl:sticky xl:top-4');
 
-  async function tabResumen(p) {
-    const [asistencias, pagos, citas, cumpl] = await Promise.all([
-      API.asistenciasDePaciente(p.id), API.pagosDePaciente(p.id), API.citasDePaciente(p.id),
-      API.cumplimientoDePaciente(p.id)
-    ]);
+  async function tabResumen(p, datosResumen) {
+    const [asistencias, pagos, citas, cumpl] = datosResumen;
     const totalPagado = pagos.reduce((s, x) => s + x.monto, 0);
     const prox = p.proxima_cita;
+    const completas = EstadisticasCitas.completadas(citas).sort((a, b) => new Date(b.inicia_en) - new Date(a.inicia_en));
+    const anoActual = Number(EstadisticasCitas.dia(new Date()).slice(0, 4));
+    const anos = [...new Set([anoActual, ...completas.map(c => Number(EstadisticasCitas.dia(c.inicia_en).slice(0, 4)))])].sort((a, b) => b - a);
 
     return `
+      <section class="agenda-panel mb-4"><div class="agenda-toolbar"><h2>Sesiones completadas del paciente</h2>
+        <label>Agrupar por <select id="paciente-escala"><option value="mes">Mes</option><option value="ano">Año</option></select></label>
+        <label>Año <select id="paciente-periodo">${anos.map(a => `<option value="${a}">${a}</option>`).join('')}</select></label></div>
+        <p class="agenda-hint">Última sesión: ${completas[0] ? E(fmtDateTime(completas[0].inicia_en)) : 'Sin sesiones completadas'}. Esta gráfica se consulta únicamente en el sistema.</p>
+        <div id="paciente-grafica" aria-live="polite"></div></section>
       ${(cumpl.faltas > 0 || cumpl.canceladas > 0) ? card(`
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-ink-400">Control de asistencia</p>

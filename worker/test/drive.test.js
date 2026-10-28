@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { respaldarValoraciones, nombreRespaldo } from '../src/drive.js';
+import { conCarpetas } from './drive-mock.js';
 
 const version = {
   id: '11111111-1111-4111-8111-111111111111', bloqueo: 'lease',
+  paciente_id: 'paciente',
   paciente_nombre: 'Ana / Pérez', creado_en: '2026-10-09T12:00:00Z',
   contenido: { creado_en: '2026-09-15T12:00:00Z', datos: { dolor: 4 } }
 };
@@ -49,6 +51,7 @@ test('acorta documentos y fotos existentes conservando sus identificadores priva
       assert.equal(body.appProperties.clidanfi_nombre, '4');
       return Response.json({ id: url.includes('/pdf?') ? 'pdf' : 'adjunto-0' });
     };
+    globalThis.fetch = conCarpetas(globalThis.fetch);
     const result = await respaldarValoraciones(env);
     assert.equal(result.renombrados, 2);
     assert.equal(result.conversionesFallidas, 0);
@@ -79,6 +82,11 @@ test('sube copia completa y reutiliza archivo en reintento; conserva errores', a
         if (String(url).includes('/upload/')) {
           if (modo === 'fallo') return new Response('', { status: 503 });
           const multipart = await opts.body.text();
+          const metadata = JSON.parse(multipart.split('\r\n\r\n')[1].split('\r\n')[0]);
+          if (opts.method === 'POST') {
+            assert.deepEqual(metadata.parents, ['carpeta-paciente']);
+            assert.equal(metadata.appProperties.clidanfi_paciente, version.paciente_id);
+          }
           assert.ok(multipart.includes('%PDF-'));
           assert.ok(multipart.includes('application/pdf'));
           assert.ok(multipart.includes('clidanfi_version'));
@@ -106,6 +114,7 @@ test('sube copia completa y reutiliza archivo en reintento; conserva errores', a
         if (opts.method === 'PATCH') return new Response(null, { status: 204 });
         throw new Error('Petición inesperada');
       };
+      globalThis.fetch = conCarpetas(globalThis.fetch);
       if (modo === 'otra-cuenta') {
         await assert.rejects(() => respaldarValoraciones(env), /clidanfi@gmail.com/);
         assert.ok(!calls.some(c => c.url.includes('/rpc/')));

@@ -43,7 +43,7 @@ function montarAPI({ respuestas = {}, storage = {} } = {}) {
 
     const b = {};
     for (const m of ['select', 'eq', 'neq', 'gte', 'lte', 'order', 'limit',
-                     'insert', 'update', 'delete', 'upsert', 'or', 'in']) {
+                     'insert', 'update', 'delete', 'upsert', 'or', 'in', 'range']) {
       b[m] = (...args) => { entrada.ops.push([m, args]); return b; };
     }
     const resolver = () => {

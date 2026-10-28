@@ -31,6 +31,12 @@
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
 
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+/js/*
+  Cache-Control: public, max-age=0, must-revalidate
+
 /js/env.js
   Cache-Control: public, max-age=0, must-revalidate
 
@@ -41,7 +47,7 @@
 /sw.js
   Cache-Control: public, max-age=0, must-revalidate
 
-# Los estáticos sí, y se invalidan solos porque cambian de contenido.
+# CSS: el build cambia su URL cuando cambia el contenido.
 
 /css/*
   Cache-Control: public, max-age=604800

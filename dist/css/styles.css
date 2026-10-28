@@ -214,6 +214,28 @@ input, select, textarea { font-size: 16px; }
    queden exactamente como estaban. A partir de 900 px pone el tope de ancho.
    ========================================================================== */
 .view-container { width: 100%; }
+/* Las barras cargan una sola vez al entrar en pantalla; después solo respiran. */
+.motion-meter{position:relative;isolation:isolate;display:block}
+.motion-meter-fill{position:relative;transform-origin:left center;overflow:hidden}
+.motion-meter[data-motion-state="pending"] .motion-meter-fill{transform:scaleX(0)}
+.motion-meter[data-motion-state="entering"] .motion-meter-fill{animation:meter-charge 1.05s cubic-bezier(.18,.72,.22,1) both}
+.motion-meter-fill::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 28%,rgba(255,255,255,.24) 47%,transparent 66%);opacity:0;transform:translateX(-100%)}
+.motion-meter[data-motion-state="ready"] .motion-meter-fill::after{animation:meter-breathe 6.5s ease-in-out infinite}
+.motion-meter[data-motion-visible="false"] .motion-meter-fill::after,html[data-page-hidden="true"] .motion-meter-fill::after{animation-play-state:paused}
+@keyframes meter-charge{0%{transform:scaleX(0);filter:saturate(.7)}75%{transform:scaleX(1.015);filter:saturate(1.08)}100%{transform:scaleX(1);filter:saturate(1)}}
+@keyframes meter-breathe{0%,35%{transform:translateX(-100%);opacity:0}48%{opacity:.55}70%,100%{transform:translateX(100%);opacity:0}}
+.patient-session-list{display:grid;gap:12px}
+.patient-session-row{display:grid;grid-template-columns:minmax(0,1fr) 55px;gap:12px;align-items:center;color:#243b44;text-decoration:none;border-radius:12px}
+.patient-session-row:focus-visible{outline:2px solid #0284c7;outline-offset:4px}
+.patient-session-meter{min-height:54px;border-radius:12px;background:#f0f6f8;border:1px solid #d5e5eb;overflow:hidden;display:flex;align-items:center}
+.patient-session-fill{position:absolute;inset:0 auto 0 0;background:repeating-linear-gradient(90deg,transparent 0 21px,rgba(255,255,255,.32) 21px 23px),linear-gradient(90deg,#b5e1e8,#9dd7d7);border-radius:11px;box-shadow:inset 0 1px 2px #ffffff80}
+.patient-session-name{position:relative;z-index:1;padding:12px 16px;font-size:14px;line-height:1.4;font-weight:800;overflow-wrap:anywhere;text-shadow:0 1px 0 #ffffff70}
+.patient-session-count{text-align:right;display:grid;gap:1px}.patient-session-count strong{font-size:24px;line-height:1.1;color:#1b5969;font-variant-numeric:tabular-nums}.patient-session-count small{font-size:10px;color:#617184;font-weight:700}
+@media(prefers-reduced-motion:reduce){.motion-meter-fill{transform:none!important;animation:none!important}.motion-meter-fill::after{animation:none!important;opacity:0!important}}
+@media print{.motion-meter-fill{transform:none!important;animation:none!important}.motion-meter-fill::after{display:none!important}}
+.agenda-stat-button{width:100%;border:0;background:transparent;text-align:left;font:inherit;color:inherit;cursor:pointer;border-radius:8px;padding:6px}
+.agenda-stat-button:hover{background:var(--cream-100)}
+.agenda-stat-button:focus-visible{outline:2px solid var(--brand-600);outline-offset:2px}
 
 @media (min-width: 900px) {
   body.con-sesion .view-container {
