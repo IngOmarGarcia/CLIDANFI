@@ -72,8 +72,8 @@ export async function ubicarArchivo(archivo, carpeta, version, headers, red) {
 export async function organizarRespaldos(db, headers, env, red) {
   const resultado = { organizados: 0, fallidos: 0 };
   const listado = await json(red, 'https://www.googleapis.com/drive/v3/files?' + new URLSearchParams({
-    q: `trashed = false and mimeType != '${FOLDER}' and (appProperties has { key='clidanfi_version' } or appProperties has { key='clidanfi_documento' }) and not appProperties has { key='clidanfi_carpeta' and value='1' }`,
-    fields: 'files(id,parents,appProperties),nextPageToken', pageSize: '100'
+    q: `trashed = false and (mimeType = 'application/pdf' or mimeType = 'application/json' or appProperties has { key='clidanfi_nombre' and value='4' } or appProperties has { key='clidanfi_nombre' and value='3' }) and not appProperties has { key='clidanfi_carpeta' and value='1' }`,
+    fields: 'files(id,parents,appProperties),nextPageToken', pageSize: '1000'
   }), { headers }, 'Buscar respaldos sin carpeta de paciente');
   for (const archivo of listado.files || []) {
     if (resultado.organizados >= 2 || red.usadas >= 14) break;

@@ -81,7 +81,7 @@ test('organiza respaldos antiguos por metadatos sin adivinar pacientes a partir 
   const red = { usadas: 0, fetch: async (url, options = {}) => {
     red.usadas++;
     const q = new URL(url).searchParams.get('q') || '';
-    if (q.includes("mimeType !=")) return Response.json({ files: [
+    if (q.includes("not appProperties has { key='clidanfi_carpeta'")) return Response.json({ files: [
       { id: 'historia', parents: ['root'], appProperties: { clidanfi_version: id } },
       { id: 'evidencia', parents: ['root'], appProperties: { clidanfi_documento: `${id}:adjunto-0` } }
     ] });

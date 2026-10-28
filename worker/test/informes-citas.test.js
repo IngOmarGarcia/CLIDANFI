@@ -39,7 +39,7 @@ test('Drive: un PDF por periodo, reintento sin duplicar y corrección en el mism
     red.usadas++;
     const u = new URL(url), q = u.searchParams.get('q') || '';
     if (q.includes('clidanfi_informes')) return Response.json({ files: [{ id: 'reportes-generales' }] });
-    if (q.includes('clidanfi_informe')) return Response.json({ files: [...archivos.values()] });
+    if (q.includes('clidanfi_reporte')) return Response.json({ files: [...archivos.values()] });
     if (url.includes('/upload/')) {
       const multipart = await options.body.text();
       const metadata = JSON.parse(multipart.split('\r\n\r\n')[1].split('\r\n')[0]);

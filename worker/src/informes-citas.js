@@ -101,7 +101,7 @@ export async function respaldarInformesCitas(db, headers, env, red, ahora = new 
   let token;
   do {
     if (red.usadas >= 24) return { diferidos: true };
-    const q = new URLSearchParams({ q: "trashed = false and appProperties has { key='clidanfi_informe' }",
+    const q = new URLSearchParams({ q: "trashed = false and appProperties has { key='clidanfi_reporte' and value='1' }",
       fields: 'files(id,parents,appProperties),nextPageToken', pageSize: '1000', ...(token ? { pageToken: token } : {}) });
     const lista = await pedir(red, `https://www.googleapis.com/drive/v3/files?${q}`, { headers }, 'Buscar informes generales');
     archivos.push(...(lista.files || [])); token = lista.nextPageToken;
@@ -135,7 +135,7 @@ export async function respaldarInformesCitas(db, headers, env, red, ahora = new 
   const resultado = { guardados: 0, actualizados: 0 };
   for (const { p, firma, anterior } of pendientes) {
     const metadata = { name: `Informe ${p.tipo} ${p.tipo === 'mensual' ? p.desde.slice(0, 7) : p.desde.slice(0, 4)}.pdf`,
-      mimeType: 'application/pdf', appProperties: { clidanfi_informe: p.clave, clidanfi_firma: firma },
+      mimeType: 'application/pdf', appProperties: { clidanfi_reporte: '1', clidanfi_informe: p.clave, clidanfi_firma: firma },
       ...(!anterior ? { parents: [carpeta.id] } : {}) };
     const boundary = `clidanfi_${crypto.randomUUID()}`;
     const body = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
