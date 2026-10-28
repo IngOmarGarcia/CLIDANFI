@@ -275,11 +275,32 @@
   /** ¿Este campo admite opciones nuevas? Solo las listas, no los textos. */
   const CAMPOS_AMPLIABLES = ['select', 'checks', 'tests'];
 
+  // Conteo orientativo del tramo actual, sin modificar el historial clínico.
+  const sesionesTratamiento = (asistencias, ahora = new Date()) => {
+    const limite = 30;
+    const dia = fecha => {
+      const d = new Date(fecha);
+      return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000;
+    };
+    const fechas = (asistencias || []).map(a => new Date(a.asistio_en))
+      .filter(d => Number.isFinite(d.getTime()) && d <= ahora).sort((a, b) => a - b);
+    let numero = 0, inicio = null, ultima = null;
+    for (const fecha of fechas) {
+      if (!ultima || dia(fecha) - dia(ultima) >= limite) { numero = 0; inicio = fecha; }
+      numero++;
+      ultima = fecha;
+    }
+    const reiniciado = !!ultima && dia(ahora) - dia(ultima) >= limite;
+    return { numero: reiniciado ? 0 : numero, inicio: reiniciado ? null : inicio,
+      ultima, reiniciado, diasPausa: limite };
+  };
+
   global.Store = {
     CATALOGO_EJERCICIOS,
     CATEGORIAS_EJERCICIO,
     SECCIONES_VALORACION,
     CAMPOS_AMPLIABLES,
+    sesionesTratamiento,
     opcionesDeCampo,
     ejercicio: (id) => CATALOGO_EJERCICIOS.find((e) => e.id === id) || null
   };

@@ -641,9 +641,16 @@
       .lte('inicia_en', addDays(new Date(), dias).toISOString())
       .order('inicia_en', { ascending: true }).limit(limite)));
 
-  const citasDePaciente = async (pacienteId) =>
-    _conNombre(ok(await sb.from('citas').select(SELECT_CITA)
-      .eq('paciente_id', pacienteId).order('inicia_en', { ascending: false })));
+  const citasDePaciente = async (pacienteId) => {
+    const rows = [];
+    for (let desde = 0; ; desde += 1000) {
+      const pagina = ok(await sb.from('citas').select(SELECT_CITA)
+        .eq('paciente_id', pacienteId).order('inicia_en', { ascending: false })
+        .order('id', { ascending: true }).range(desde, desde + 999));
+      rows.push(...pagina);
+      if (pagina.length < 1000) return _conNombre(rows);
+    }
+  };
 
   const proximaCitaDePaciente = async (pacienteId) => {
     const c = await _proximaCitaDe(pacienteId);

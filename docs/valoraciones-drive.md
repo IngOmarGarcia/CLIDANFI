@@ -1,5 +1,33 @@
 # Conservación de valoraciones y respaldo en Drive
 
+## Estadísticas e informes generales de citas
+
+Las gráficas de agenda y ficha cuentan solo citas `completada`, por fecha de
+atención en `America/Mexico_City`. La ficha muestra años, meses del año elegido
+y última sesión completada. Sus estadísticas se consultan únicamente en el
+sistema, sin generar documentos individuales en Drive. En la agenda, las barras
+abren el listado de pacientes únicos con su cantidad de sesiones en ese periodo.
+Las semanas parciales se limitan al mes seleccionado.
+
+Al publicar el Worker, se guardan PDF mensuales (una vez cerrado el mes)
+y anuales (una vez cerrado el año) en `Reportes generales`. Incluyen
+totales por semana del mes o por mes del año y gráfico de barras, sin nombres, identificadores ni listas
+de pacientes. Se recuperan también los periodos cerrados desde la primera cita
+completada existente, incluidos periodos sin sesiones entre medias.
+
+Las barras de la interfaz se cargan al entrar en pantalla una sola vez por periodo
+y paciente durante la visita. Después conservan un brillo suave, pausado fuera
+de pantalla. El listado se ordena por cantidad de sesiones y lleva barras detrás
+del nombre. `prefers-reduced-motion` muestra los valores inmediatamente y elimina
+el movimiento. Los PDF permanecen estáticos.
+
+Cada periodo tiene una clave estable en Drive. Los reintentos reutilizan el
+archivo; si se corrige una cita histórica, el PDF del periodo afectado se actualiza
+conservando el ID y el enlace. Las ejecuciones sin cambios no generan archivos.
+Se procesan hasta dos informes por pasada con el presupuesto que quede después
+de respaldar expedientes. `[drive].informes` informa guardados, actualizados,
+errores o trabajo diferido. No requiere otra migración SQL.
+
 ## Hallazgos
 
 El código no contiene borrados mensuales de valoraciones. La consulta muestra
@@ -46,6 +74,33 @@ logs de borrado y respaldos anteriores. No ejecutar seed.sql para recuperar dato
    Los avisos push y el respaldo se ejecutan de forma independiente.
 
 ## Resultado y verificación
+
+### Carpetas por paciente
+
+El Worker guarda todos los PDF y adjuntos del expediente en una carpeta con el
+nombre del paciente. Reutiliza una carpeta existente si hay una sola coincidencia
+exacta visible para el cliente OAuth y un solo paciente con ese nombre. Después
+la identifica por `appProperties.clidanfi_paciente` (UUID), por lo que las ediciones
+y los cambios de nombre no dispersan los respaldos en carpetas distintas.
+Si no hay carpeta, la crea en `GOOGLE_DRIVE_FOLDER_ID` o en Mi unidad.
+Los nombres duplicados o carpetas vinculadas a otro paciente dejan el respaldo
+pendiente con un error, para resolver la asociación sin mezclar expedientes.
+
+Al publicar el Worker, las copias antiguas se organizan progresivamente (hasta
+dos por ejecución, cuando hay presupuesto después de las subidas). Se mueve el
+mismo archivo usando `addParents` y `removeParents`: mantiene su ID y enlace.
+Solo se procesan archivos con metadatos de CLIDANFI, sin deducir la identidad
+del paciente a partir del nombre del archivo. El resultado aparece en
+`[drive].carpetas`. No hace falta otra migración de Supabase.
+
+Con el alcance `drive.file`, las carpetas creadas manualmente deben estar
+autorizadas para el mismo cliente OAuth (por ejemplo, seleccionadas con Drive
+Picker); la app no puede detectar una carpeta que Google no le permite ver.
+Verificar esa visibilidad antes de activar para evitar crear una carpeta paralela.
+No se amplían los permisos OAuth ni se modifica la compartición desde el Worker.
+
+Referencias: [carpetas y movimientos](https://developers.google.com/workspace/drive/api/guides/folder),
+[búsqueda por propiedades](https://developers.google.com/workspace/drive/api/guides/search-files).
 
 Cada versión se guarda como un PDF legible con nombre:
 `HC Nombre paciente - DD-MM-AA HH-mm-ss.pdf`.
