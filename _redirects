@@ -1,13 +1,6 @@
 # CLIDANFI · enrutado en Cloudflare Pages
 #
-# El router es por hash (#/t/dashboard), así que en la práctica no hacen falta
-# reescrituras: el servidor solo ve «/». Este catch-all está para que una ruta
-# suelta escrita a mano no devuelva un 404 desnudo.
-#
-# El 200 (y no un 301) es lo que hace que la barra de direcciones conserve lo
-# que el usuario escribió en vez de saltar a la raíz.
-#
-# Cloudflare atiende primero los archivos que existen, así que /sw.js, /js/* y
-# /assets/* se sirven tal cual y no caen aquí.
-
-/*    /index.html    200
+# El router es por hash (#/t/dashboard): el servidor recibe «/» y no necesita
+# reescrituras. Workers Assets rechaza el catch-all a /index.html porque su
+# normalización de URLs lo convierte en un bucle. El fallback de navegación
+# se configura en wrangler.toml; los archivos existentes se sirven directamente.
