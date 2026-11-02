@@ -48,6 +48,26 @@ En **SQL Editor → New query → Run**, ejecuta en este orden:
 
 Ambos son idempotentes.
 
+Para activar la edición completa de notas con historial y autoría, ejecutar después
+`supabase/valoraciones-respaldo.sql`, `supabase/documentos-respaldo.sql` y
+`supabase/autoria-notas.sql`, en ese orden, antes de publicar el cliente y el Worker.
+Los fisios con acceso al expediente pueden editar sus notas. Cada cambio conserva
+una versión anterior y genera un respaldo independiente; la copia corregida se
+identifica como «Editado». Las versiones se consultan desde la nota.
+La autoría se obtiene de `auth.uid()` en PostgreSQL para pacientes, citas,
+asistencias, pagos, valoraciones, notas, archivos y rutinas. Los registros antiguos
+sin autor se muestran como «Sin autor registrado»; no se atribuyen al usuario actual.
+Las cuentas compartidas identificarán siempre al mismo usuario: cada fisio debe
+iniciar sesión con su propia cuenta para distinguir su actividad.
+
+Antes de publicar esta actualización en la instalación de CLIDANFI, aplicar las
+migraciones de autoría anteriores y `supabase/limpiar-datos-prueba.sql`. La limpieza
+identifica por UUID y marcadores los dos expedientes técnicos conocidos y su cuenta
+de paciente; conserva los expedientes reales y reactiva la protección de borrado de
+valoraciones. Los objetos de Storage y las copias de Drive se limpian aparte usando
+sus identificadores verificados antes de eliminar las filas. No ejecutar la semilla
+de demostración sobre producción después de esta limpieza.
+
 > **Si ya tenías la base montada, vuelve a ejecutar `supabase/schema.sql` completo.**
 > Es idempotente y no borra datos: las columnas nuevas se añaden con `add column if not
 > exists` y los paquetes ya contratados conservan su saldo. Sin ese paso faltarán el precio

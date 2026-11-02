@@ -1137,6 +1137,7 @@
               <div class="min-w-0 flex-1">
                 <p class="text-[13px] font-bold capitalize text-ink-800">${E(relDay(a.asistio_en))}</p>
                 <p class="text-[11.5px] text-ink-400">${E(fmtDateTime(a.asistio_en))}</p>
+                ${autoriaRegistro(a)}
               </div>
               ${badge('+1 boleto', 'violet')}
             </div>`).join('')
@@ -1149,13 +1150,6 @@
   async function tabValoracion(p) {
     const v = await API.valoracionDePaciente(p.id);
     const versiones = await API.historialValoraciones(p.id);
-    const historial = versiones === null
-      ? '<p class="text-[12px] text-amber-700">Conservación de versiones pendiente de activar en Supabase.</p>'
-      : `<div class="space-y-2"><h3 class="font-bold">Historial de guardados (${versiones.length})</h3>${versiones.map(h => `
-          <details class="rounded-xl border border-ink-200 bg-white p-3">
-            <summary class="cursor-pointer text-[12px] font-bold">${E(new Date(h.creado_en).toLocaleString('es-MX'))} · ${h.drive_archivo_id ? 'Respaldado en Drive' : 'Respaldo en Drive pendiente'}</summary>
-            <pre class="mt-2 whitespace-pre-wrap break-words text-[12px]">${E(JSON.stringify(h.contenido.datos, null, 2))}</pre>
-          </details>`).join('')}</div>`;
 
     if (!v) {
       return `
@@ -1187,11 +1181,39 @@
       return String(val);
     };
 
+    const guardados = (versiones || []).filter(h => h.valoracion_id === v.id)
+      .sort((a, b) => new Date(b.creado_en) - new Date(a.creado_en));
+    const ultimaRespaldada = guardados.find(h => h.drive_archivo_id);
+    const estadoRespaldo = versiones === null ? 'Respaldo de esta valoración sin verificar'
+      : ultimaRespaldada ? `Versión del ${fmtDateTime(ultimaRespaldada.creado_en)} respaldada`
+      : 'Respaldo de esta valoración pendiente';
+    const historial = `
+      <div class="rounded-xl bg-ink-50 px-3 py-2 text-[11px] text-ink-500">
+        <p>${E(estadoRespaldo)}</p>
+        ${ultimaRespaldada && guardados[0]?.id !== ultimaRespaldada.id ? '<p class="mt-1 text-amber-800">Hay cambios más recientes pendientes de respaldo.</p>' : ''}
+      </div>
+      ${guardados.length ? `<details class="rounded-xl border border-ink-200 bg-white px-3 py-2">
+        <summary class="min-h-[44px] cursor-pointer py-3 text-[12px] font-bold text-ink-600">Consultar versiones guardadas (${guardados.length})</summary>
+        <div class="mt-2 space-y-3">${guardados.map(h => `
+          <details class="rounded-xl bg-ink-50 p-3">
+            <summary class="cursor-pointer text-[12px] font-bold">${E(fmtDateTime(h.creado_en))}</summary>
+            ${autoriaRegistro(h.contenido)}
+            ${Store.SECCIONES_VALORACION.filter(sec => (h.contenido.secciones_activas || []).includes(sec.key)).map(sec => `
+              <div class="mt-3"><h4 class="text-[12px] font-bold text-ink-800">${E(sec.titulo)}</h4>
+                ${sec.campos.map(c => {
+                  const txt = renderValor(c, h.contenido.datos?.[sec.key]?.[c.key]);
+                  return txt ? `<p class="mt-1 text-[12px] text-ink-600"><strong>${E(c.label)}:</strong> ${E(txt)}</p>` : '';
+                }).join('')}
+              </div>`).join('')}
+          </details>`).join('')}</div>
+      </details>` : ''}`;
+
     return `
       <div class="flex items-center justify-between rounded-2xl border border-brand-200 bg-brand-50 px-3.5 py-3">
         <div>
           <p class="text-[11px] font-extrabold uppercase tracking-wider text-brand-700">Valoración inicial</p>
           <p class="text-[13px] font-bold text-brand-900">${E(fmtDate(v.creado_en))} · ${activas.length} secciones</p>
+          ${autoriaRegistro(v)}
         </div>
         <button data-action="abrir-valoracion" data-id="${p.id}"
           class="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-[12.5px] font-bold text-white active:scale-95">
@@ -1224,6 +1246,18 @@
   /* -------------------------------------------------- Tab · Historial ---- */
 
   /** Miniatura de un archivo del expediente: la imagen se ve, el PDF se rotula. */
+  // Atribución histórica indicada por la clínica, hasta el 2 de noviembre de 2026
+  // inclusive (Ciudad de México). No atribuir a CLIDANFI futuros registros sin autor.
+  const nombreAutorRegistro = (r, editado = false) => {
+    const nombre = String((editado ? r.editado_por_nombre : r.creado_por_nombre) || '').trim();
+    if (nombre && nombre !== 'Sin autor registrado') return nombre;
+    const fecha = editado ? r.editado_en : r.creado_en || r.pagado_en;
+    const fechaMs = fecha ? new Date(fecha).getTime() : NaN;
+    return Number.isFinite(fechaMs) && fechaMs < Date.parse('2026-11-03T06:00:00Z')
+      ? 'CLIDANFI' : 'Sin autor registrado';
+  };
+  const etiquetaAutor = (nombre) => `<span class="rounded bg-sky-50 px-1 font-bold text-sky-600">${E(nombre)}</span>`;
+  const autoriaRegistro = (r) => `<p class="text-[11px] text-ink-500">Creado por ${etiquetaAutor(nombreAutorRegistro(r))}${r.editado_en ? `<br>Editado por ${etiquetaAutor(nombreAutorRegistro(r, true))} · ${E(fmtDateTime(r.editado_en))}` : ''}</p>`;
   const tarjetaArchivo = (a) => `
     <div class="w-32 shrink-0 overflow-hidden rounded-xl border border-ink-200 bg-white shadow-card">
       <button data-action="ver-archivo" data-id="${a.id}" data-pdf="${a.es_pdf ? '1' : '0'}"
@@ -1238,6 +1272,7 @@
           ${E(a.categoria)} · ${E(fmtBytes(a.tamano))}
         </p>
       </button>
+      ${autoriaRegistro(a)}
       <div class="flex items-center justify-between px-1.5 pb-1.5 pt-1">
         <span class="text-[9.5px] font-bold text-ink-400">${E(fmtDate(a.creado_en))}</span>
         <button data-action="borrar-archivo" data-id="${a.id}" aria-label="Eliminar archivo"
@@ -1316,7 +1351,11 @@
                     <div>
                       <p class="text-[12.5px] font-extrabold capitalize text-ink-900">${E(relDay(n.fecha_nota || n.creado_en))}</p>
                       <p class="text-[11px] font-medium text-ink-400">${E(fmtDateTime(n.fecha_nota || n.creado_en))}</p>
-                      <button data-action="fecha-nota" data-id="${E(n.id)}" data-fecha="${E(n.fecha_nota || n.creado_en)}" class="min-h-[44px] text-[12px] font-bold text-brand-700">Cambiar fecha</button>
+                      ${autoriaRegistro(n)}
+                      <div class="mt-3 flex flex-wrap gap-3">
+                        <button data-action="editar-nota" data-id="${E(n.id)}" data-paciente="${E(p.id)}" class="min-h-[44px] rounded-xl bg-brand-600 px-4 py-2 text-[12px] font-bold text-white">Editar nota</button>
+                        <button data-action="historial-nota" data-id="${E(n.id)}" class="min-h-[44px] rounded-xl border border-ink-200 bg-white px-4 py-2 text-[12px] font-bold text-ink-700">Ver versiones anteriores</button>
+                      </div>
                     </div>
                     <div class="flex shrink-0 items-center gap-1.5">
                       ${n.eva !== null && n.eva !== undefined ? badge(`EVA ${n.eva}/10`, n.eva >= 7 ? 'rose' : n.eva >= 4 ? 'amber' : 'green') : ''}
@@ -1372,6 +1411,7 @@
                 ${r.activa ? badge('Activa', 'brand') : ''}
               </div>
               <p class="mt-0.5 text-[11.5px] font-medium text-ink-400">${E(fmtDate(r.creado_en))} · ${r.items.length} ejercicios</p>
+              ${autoriaRegistro(r)}
             </div>
             <div class="flex shrink-0 gap-1">
               ${!r.activa ? `<button data-action="activar-rutina" data-id="${r.id}" title="Marcar como activa"
@@ -2482,6 +2522,7 @@
       title: c.paciente_nombre,
       subtitle: `${fmtDateTime(c.inicia_en)} · ${c.motivo}`,
       body: `
+        ${autoriaRegistro(c)}
         <div class="space-y-1">
           ${c.estado !== 'agendada' ? `
             <div class="mb-2 rounded-xl bg-ink-50 px-3 py-2.5">
@@ -2885,10 +2926,48 @@
     });
   }
 
-  async function sheetNota(pacienteId) {
-    const adjuntos = [];
+  async function sheetHistorialNota(id) {
+    const versiones = await API.historialNotas(id);
+    versiones.sort((a, b) => b.numero - a.numero);
+    const sinDato = value => value === null || value === undefined || value === '';
+    const mostrar = value => sinDato(value) ? 'Sin registro' : String(value);
+    const fecha = n => n.fecha_nota || n.creado_en;
+    const evidencias = n => (n.adjuntos || []).map(a => ({
+      id: a.id || a.ruta || a.url, titulo: a.titulo || 'Evidencia', ruta: a.ruta || null
+    }));
+    openSheet({ title: 'Versiones de la nota', subtitle: 'Los campos en amarillo cambiaron respecto a la versión anterior.', size: 'tall', body: versiones.map((v, i) => {
+      const n = v.contenido;
+      const anterior = versiones[i + 1]?.contenido;
+      const campo = (label, actual, previo, contenido = null, comparableActual = actual, comparablePrevio = previo) => {
+        const cambiado = !!anterior && JSON.stringify(sinDato(comparableActual) ? null : comparableActual) !== JSON.stringify(sinDato(comparablePrevio) ? null : comparablePrevio);
+        return `<div class="mt-2 rounded-xl p-3 ${cambiado ? 'border border-amber-300 bg-amber-50' : 'bg-ink-50'}">
+          <p class="text-[12px] font-bold text-ink-700">${E(label)}${cambiado ? ' <span class="text-amber-800">· Modificado</span>' : ''}</p>
+          ${contenido ?? `<p class="whitespace-pre-wrap text-[13px] text-ink-800">${E(mostrar(actual))}</p>`}
+          ${cambiado ? `<p class="mt-1 whitespace-pre-wrap text-[12px] text-amber-900">Antes: ${E(mostrar(previo))}</p>` : ''}
+        </div>`;
+      };
+      return `<article class="mb-6 overflow-hidden rounded-2xl border-2 ${i % 2 === 0 ? 'border-brand-200 bg-brand-50' : 'border-ink-300 bg-ink-100'} p-4 shadow-card">
+        <div class="mb-3 border-b border-ink-300 pb-3">
+          <strong class="block text-[15px] text-ink-900">Versión ${v.numero} · ${n.editado_en ? 'Editado' : 'Original'}</strong>
+          <p class="mt-1 text-[12px] text-ink-600">${etiquetaAutor(nombreAutorRegistro({ ...n, creado_en: n.creado_en || v.creado_en }, !!n.editado_en))} · ${E(fmtDateTime(n.editado_en || v.creado_en))}</p>
+        </div>
+        ${!anterior ? '<p class="mt-1 text-[12px] text-ink-500">Primera versión conservada; sin comparación anterior.</p>' : ''}
+        ${campo('Fecha y hora de atención', fmtDateTime(fecha(n)), anterior ? fmtDateTime(fecha(anterior)) : null, null, new Date(fecha(n)).getTime(), anterior ? new Date(fecha(anterior)).getTime() : null)}
+        ${campo('Dolor (EVA)', n.eva, anterior?.eva)}
+        ${campo('Evolución', n.texto, anterior?.texto)}
+        ${[['ta', 'T/A (mmHg)'], ['tem', 'Temperatura (°C)'], ['fc', 'Frecuencia cardiaca (lpm)'], ['fr', 'Frecuencia respiratoria (rpm)']].map(([k, label]) => campo(label, n.signos_vitales?.[k], anterior?.signos_vitales?.[k])).join('')}
+        ${campo('Fotos / evidencias', evidencias(n).map(a => a.titulo).join(', '), anterior ? evidencias(anterior).map(a => a.titulo).join(', ') : null,
+          (n.adjuntos || []).length ? (n.adjuntos || []).map(a => `<button data-action="ver-foto" data-url="${E(a.url)}" data-titulo="${E(a.titulo)}" class="mr-2 min-h-[44px] text-brand-700">${E(a.titulo || 'Evidencia')}</button>`).join('') : '<p class="text-[13px] text-ink-800">Sin evidencias</p>',
+          evidencias(n), anterior ? evidencias(anterior) : null)}
+      </article>`;
+    }).join('') || '<p>Sin versiones registradas.</p>' });
+  }
+
+  async function sheetNota(pacienteId, notaId = null) {
+    const nota = notaId ? await API.obtenerNota(notaId) : null;
+    const adjuntos = [...(nota?.adjuntos || [])];
     openSheet({
-      title: 'Nota de evolución',
+      title: nota ? 'Editar nota de evolución' : 'Nota de evolución',
       subtitle: 'Registro clínico de la sesión',
       size: 'tall',
       body: `
@@ -2926,7 +3005,15 @@
         </div>`,
       footer: `<button id="btn-guardar-nota" class="w-full rounded-xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">Guardar nota</button>`,
       onMount: (root) => {
+        if (nota) {
+          root.querySelector('#f-nota-fecha').value = toLocalInput(nota.fecha_nota || nota.creado_en);
+          root.querySelector('#f-nota-texto').value = nota.texto;
+          root.querySelector('#f-nota-eva').value = nota.eva ?? 0;
+          for (const k of ['ta', 'tem', 'fc', 'fr']) root.querySelector('#f-nota-' + k).value = nota.signos_vitales?.[k] ?? '';
+          root.querySelector('#btn-guardar-nota').textContent = 'Guardar nueva versión';
+        }
         const out = root.querySelector('#out-eva');
+        out.textContent = (nota?.eva ?? 0) + '/10';
         root.querySelector('#f-nota-eva').addEventListener('input', (e) => {
           const v = Number(e.target.value);
           out.textContent = `${v}/10`;
@@ -2942,6 +3029,7 @@
                 class="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-ink-900/70 text-white">${icon('x', 'h-3 w-3', 3)}</button>
             </div>`).join('');
         };
+        pintar();
         previews.addEventListener('click', (e) => {
           const b = e.target.closest('[data-del]');
           if (b) { adjuntos.splice(Number(b.dataset.del), 1); pintar(); }
@@ -2965,13 +3053,15 @@
           const boton = e.currentTarget;
           boton.disabled = true;
           try {
-          await API.crearNota({
+          const cambios = {
             paciente_id: pacienteId, texto,
             fecha_nota: val(root, '#f-nota-fecha'),
             signos_vitales: Object.fromEntries(['ta', 'tem', 'fc', 'fr'].map(k => [k, val(root, `#f-nota-${k}`)])),
             eva: Number(root.querySelector('#f-nota-eva').value),
             adjuntos
-          });
+          };
+          if (nota) await API.editarNota(nota.id, cambios, nota.revision || 1);
+          else await API.crearNota(cambios);
           closeSheet();
           toast('Nota guardada');
           App.render();
@@ -3976,7 +4066,7 @@
     sheetCatalogoEjercicios, sheetEjercicio, sheetMarcarFalta,
     leerValoracion, rutinaEnEdicion, hayCambiosSinGuardar, marcarLimpio,
     sheetPaciente, sheetCita, sheetMenuCita, sheetCancelarCita, sheetAsistencia,
-    sheetNota, sheetFechaNota, sheetFoto, verArchivo, subirArchivosExpediente,
+    sheetHistorialNota, sheetNota, sheetFechaNota, sheetFoto, verArchivo, subirArchivosExpediente,
     sheetSorteo, sheetParticipantes, ejecutarSorteo, sheetPromos, sheetPromoForm,
     sheetSolicitudes, sheetClinica,
     sheetWhatsApp, whatsappCita, whatsappPaciente, sheetRecordatorios, MENSAJES

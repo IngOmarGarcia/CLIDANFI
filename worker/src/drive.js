@@ -31,7 +31,7 @@ export function nombreRespaldo(version, adjunto = null) {
     : tiposCortos[version.origen] || 'HC';
   const titulo = adjunto ? ` - ${seguro(adjunto.titulo)}` : '';
   const extension = adjunto ? (adjunto.ruta?.split('.').pop()?.match(/^[a-z0-9]{1,10}$/i)?.[0] || 'bin') : 'pdf';
-  return `${tipo} ${nombre}${titulo}${version.actualizado || version.numero > 1 ? ' - Actualizado' : ''} - ${fecha}.${extension}`;
+  return `${tipo} ${nombre}${titulo}${version.origen === 'notas' && version.contenido.editado_en ? ' - Editado' : version.actualizado || version.numero > 1 ? ' - Actualizado' : ''} - ${fecha}.${extension}`;
 }
 
 async function identificarEdicion(db, version) {

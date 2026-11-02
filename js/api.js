@@ -249,7 +249,9 @@
     }
     return {
       user: { id: session.user.id, email: session.user.email },
-      perfil: { id: data.id, rol: data.rol, nombre: data.nombre || session.user.email }
+      perfil: { id: data.id, rol: data.rol, nombre: data.rol === 'fisio'
+        ? `Fisio. ${String(data.nombre || session.user.email).replace(/^(?:fisio\.?\s+)+/i, '').trim()}`
+        : data.nombre || session.user.email }
     };
   };
 
@@ -1033,6 +1035,22 @@
     return ok(await sb.from('notas').insert({ paciente_id, tipo, texto, eva, adjuntos: subidos, fecha_nota: fecha, signos_vitales: signos }).select().single());
   };
 
+  const obtenerNota = async (id) => ok(await sb.from('notas').select('*').eq('id', id).single());
+  const historialNotas = async (id) => ok(await sb.from('documentos_versiones').select('*')
+    .eq('origen', 'notas').eq('documento_id', id).order('numero', { ascending: false }));
+  const editarNota = async (id, cambios, revision) => {
+    const actual = await obtenerNota(id);
+    const adjuntos = [];
+    for (const a of cambios.adjuntos || []) {
+      if (a.ruta || !a.url.startsWith('data:')) { adjuntos.push(a); continue; }
+      const r = await _subirEvidencia(a.url, actual.paciente_id);
+      adjuntos.push({ ...a, ...r, id: uid('adj'), creado_en: new Date().toISOString() });
+    }
+    return ok(await sb.rpc('editar_nota_versionada', { nota_id: id, revision_esperada: revision,
+      cambios: { texto: cambios.texto, eva: cambios.eva, adjuntos,
+        fecha_nota: fechaNotaValida(cambios.fecha_nota), signos_vitales: signosNotaValidos(cambios.signos_vitales) } }));
+  };
+
   const agregarAdjunto = async (notaId, { url, titulo = 'Evidencia' }) => {
     const nota = ok(await sb.from('notas').select('*').eq('id', notaId).single());
     const r = url.startsWith('data:') ? await _subirEvidencia(url, nota.paciente_id) : { url, ruta: null };
@@ -1804,7 +1822,7 @@
     'listarEjercicios', 'guardarEjercicio', 'eliminarEjercicio',
     'agregarOpcionValoracion', 'eliminarOpcionValoracion',
     'registrarPago', 'actualizarPago', 'eliminarPago', 'ingresosSemana',
-    'guardarValoracion', 'crearNota', 'cambiarFechaNota', 'agregarAdjunto', 'eliminarNota',
+    'obtenerNota', 'historialNotas', 'editarNota', 'guardarValoracion', 'crearNota', 'cambiarFechaNota', 'agregarAdjunto', 'eliminarNota',
     'subirArchivo', 'eliminarArchivo', 'enlaceDeArchivo',
     'guardarRutina', 'activarRutina', 'eliminarRutina',
     'guardarPromocion', 'eliminarPromocion',
@@ -1876,7 +1894,7 @@
     valoracionDePaciente, guardarValoracion, historialValoraciones,
     opcionesValoracion, agregarOpcionValoracion, eliminarOpcionValoracion,
     listarEjercicios, guardarEjercicio, eliminarEjercicio,
-    notasDePaciente, crearNota, cambiarFechaNota, agregarAdjunto, eliminarNota,
+    obtenerNota, historialNotas, editarNota, notasDePaciente, crearNota, cambiarFechaNota, agregarAdjunto, eliminarNota,
     archivosDePaciente, subirArchivo, eliminarArchivo, enlaceDeArchivo,
     rutinasDePaciente, rutinaActiva, guardarRutina, activarRutina, eliminarRutina,
     listarPromociones, guardarPromocion, eliminarPromocion,

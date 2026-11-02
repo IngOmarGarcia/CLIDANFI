@@ -79,6 +79,8 @@ export async function generarValoracionPdf(version) {
   nueva();
   texto(version.paciente_nombre, { fuerte: true, size: 16 }); y -= 5;
   texto(`Creación: ${fecha(version.contenido.creado_en)}`);
+  texto(`Creado por: ${version.contenido.creado_por_nombre || 'Sin autor registrado'}`);
+  if (version.contenido.editado_en) texto(`Editado por: ${version.contenido.editado_por_nombre || 'Sin autor registrado'} | ${fecha(version.contenido.editado_en)}`);
   texto(`Versión guardada: ${fecha(version.creado_en)} (hora de Ciudad de México)`);
   texto(`Documento: ${version.contenido.id || version.valoracion_id || '-'}`, { size: 8 });
   texto(`Versión: ${version.id}`, { size: 8 }); y -= 12;

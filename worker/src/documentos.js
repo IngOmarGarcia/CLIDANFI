@@ -31,7 +31,9 @@ export function prepararDocumento(version) {
     default: throw new Error(`Tipo de documento no soportado: ${version.origen}`);
   }
   return { ...version, titulo_documento: tiposDocumento[version.origen],
-    contenido: { id: version.documento_id, creado_en: c.creado_en || c.pagado_en || version.creado_en, datos } };
+    contenido: { id: version.documento_id, creado_en: c.creado_en || c.pagado_en || version.creado_en,
+      creado_por_nombre: c.creado_por_nombre, editado_por_nombre: c.editado_por_nombre,
+      editado_en: c.editado_en, datos } };
 }
 
 // Solo objetos privados de nuestros buckets. Nunca solicitar URLs aportadas por usuarios.
