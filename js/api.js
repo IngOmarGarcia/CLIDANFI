@@ -5,7 +5,7 @@
    Supabase por su cuenta.
 
    El cliente se crea una sola vez en js/supabase-client.js y llega aquí como
-   `window.SB`. No hay modo demostración ni almacenamiento local: si falta
+   `window.SB`. offline.js añade almacenamiento local por cuenta; si falta
    configuración, este módulo no se activa y app.js muestra la pantalla de
    configuración.
    ========================================================================== */
@@ -119,6 +119,17 @@
     return data;
   };
 
+  // La preparación sin conexión debe incluir también expedientes con más de
+  // 1.000 registros. Cada consulta necesita un orden estable entre páginas.
+  const todasLasFilas = async (consulta) => {
+    const rows = [];
+    for (let desde = 0; ; desde += 1000) {
+      const pagina = ok(await consulta().range(desde, desde + 999));
+      rows.push(...pagina);
+      if (pagina.length < 1000) return rows;
+    }
+  };
+
   /**
    * Envuelve una consulta que puede no existir todavía en la base.
    * Si falta el objeto devuelve `porDefecto` en vez de tumbar la pantalla.
@@ -216,6 +227,7 @@
   const OBJETOS_VERIFICABLES = ['solicitudes_cita', 'configuracion'];
 
   const verificarEsquema = async () => {
+    if (global.Offline && !Offline.online()) return faltaEnEsquema();
     await Promise.all(OBJETOS_VERIFICABLES.map(async (tabla) => {
       try {
         const { error } = await sb.from(tabla).select('*', { count: 'exact', head: true });
@@ -242,8 +254,13 @@
    */
   const _normalizar = async (session) => {
     if (!session || !session.user) return null;
+    if (global.Offline && !Offline.online()) return Offline.cachedSession(session.user.id);
     const { data, error } = await sb.from('perfiles').select('id, rol, nombre').eq('id', session.user.id).single();
     if (error) {
+      if (global.Offline && Offline.networkError(error)) {
+        Offline.networkUnavailable();
+        return Offline.cachedSession(session.user.id);
+      }
       console.error('[CLIDANFI] El usuario no tiene perfil en la tabla `perfiles`:', error.message);
       return null;
     }
@@ -272,9 +289,16 @@
 
     _sesion = s;
     _miPacienteId = null;
+    if (global.Offline) await Offline.remember(s);
     if (s && s.perfil.rol === 'paciente') {
+      if (global.Offline && !Offline.online()) {
+        const propio = await Offline.cachedSession(s.user.id);
+        _miPacienteId = propio?.pacienteId || null;
+        return s;
+      }
       const { data } = await sb.from('pacientes').select('id').eq('usuario_id', s.user.id).limit(1);
       _miPacienteId = data && data.length ? data[0].id : null;
+      if (global.Offline) await Offline.remember({ ...s, pacienteId: _miPacienteId });
     }
     return s;
   };
@@ -346,16 +370,41 @@
       return true;
     },
 
-    salir: async () => { await sb.auth.signOut(); await _recordarSesion(null); },
+    salir: async () => {
+      await sb.auth.signOut({ scope: 'local' });
+      await _recordarSesion(null);
+    },
 
     sesion: async () => {
+      if (global.Offline && !Offline.online()) return _recordarSesion(await Offline.cachedSession());
+      if (global.Offline) {
+        let timer;
+        try {
+          const response = await Promise.race([
+            sb.auth.getSession(),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Network request failed: tiempo de espera agotado.')), 8000); })
+          ]);
+          if (response.error) throw response.error;
+          return _recordarSesion(await _normalizar(response.data.session));
+        } catch (error) {
+          if (!Offline.networkError(error)) throw error;
+          Offline.networkUnavailable();
+          return _recordarSesion(await Offline.cachedSession());
+        } finally { clearTimeout(timer); }
+      }
       const { data } = await sb.auth.getSession();
       return _recordarSesion(await _normalizar(data.session));
     },
 
     onCambio: (cb) => {
-      const { data } = sb.auth.onAuthStateChange(async (_evento, session) =>
-        cb(await _recordarSesion(await _normalizar(session))));
+      const { data } = sb.auth.onAuthStateChange((_evento, session) => {
+        // Fuera del bloqueo de Auth: consultar PostgREST dentro del callback
+        // puede bloquear la renovación del token y el arranque completo.
+        setTimeout(async () => {
+          if (global.Offline && !Offline.online()) return;
+          cb(await _recordarSesion(await _normalizar(session)));
+        }, 0);
+      });
       return () => data.subscription.unsubscribe();
     }
   };
@@ -548,9 +597,12 @@
 
   /** Usa la vista `pacientes_ordenados`, que ya viene ordenada por última asistencia. */
   const listarPacientes = async ({ q = '' } = {}) => {
-    let query = sb.from('pacientes_ordenados').select('*');
-    if (q.trim()) query = query.or(`nombre.ilike.%${q}%,diagnostico.ilike.%${q}%,telefono.ilike.%${q}%`);
-    const rows = ok(await query);
+    const rows = await todasLasFilas(() => {
+      let query = sb.from('pacientes_ordenados').select('*')
+        .order('ultima_asistencia', { ascending: false, nullsFirst: false }).order('nombre').order('id');
+      if (q.trim()) query = query.or(`nombre.ilike.%${q}%,diagnostico.ilike.%${q}%,telefono.ilike.%${q}%`);
+      return query;
+    });
     return rows.map((p) => ({ ...p, proxima_cita: null }));
   };
 
@@ -913,10 +965,13 @@
   };
 
   const historialValoraciones = async (pacienteId) => {
-    const res = await sb.from('valoraciones_versiones').select('*')
-      .eq('paciente_id', pacienteId).order('creado_en', { ascending: false });
-    if (res.error && _esFalta(res.error)) return null;
-    return ok(res);
+    try {
+      return await todasLasFilas(() => sb.from('valoraciones_versiones').select('*')
+        .eq('paciente_id', pacienteId).order('creado_en', { ascending: false }).order('id'));
+    } catch (e) {
+      if (faltaEnEsquema()?.includes('valoraciones_versiones')) return null;
+      throw e;
+    }
   };
 
   /* --- Opciones personalizadas ------------------------------------------
@@ -996,7 +1051,7 @@
   };
 
   const notasDePaciente = async (pacienteId) => {
-    const notas = ok(await sb.from('notas').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }));
+    const notas = await todasLasFilas(() => sb.from('notas').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }).order('id'));
     return notas.sort((a, b) => new Date(b.fecha_nota || b.creado_en) - new Date(a.fecha_nota || a.creado_en));
   };
 
@@ -1036,20 +1091,8 @@
   };
 
   const obtenerNota = async (id) => ok(await sb.from('notas').select('*').eq('id', id).single());
-  const historialNotas = async (id) => ok(await sb.from('documentos_versiones').select('*')
-    .eq('origen', 'notas').eq('documento_id', id).order('numero', { ascending: false }));
-  const editarNota = async (id, cambios, revision) => {
-    const actual = await obtenerNota(id);
-    const adjuntos = [];
-    for (const a of cambios.adjuntos || []) {
-      if (a.ruta || !a.url.startsWith('data:')) { adjuntos.push(a); continue; }
-      const r = await _subirEvidencia(a.url, actual.paciente_id);
-      adjuntos.push({ ...a, ...r, id: uid('adj'), creado_en: new Date().toISOString() });
-    }
-    return ok(await sb.rpc('editar_nota_versionada', { nota_id: id, revision_esperada: revision,
-      cambios: { texto: cambios.texto, eva: cambios.eva, adjuntos,
-        fecha_nota: fechaNotaValida(cambios.fecha_nota), signos_vitales: signosNotaValidos(cambios.signos_vitales) } }));
-  };
+  const historialNotas = async (id) => todasLasFilas(() => sb.from('documentos_versiones').select('*')
+    .eq('origen', 'notas').eq('documento_id', id).order('numero', { ascending: false }).order('id'));
 
   const agregarAdjunto = async (notaId, { url, titulo = 'Evidencia' }) => {
     const nota = ok(await sb.from('notas').select('*').eq('id', notaId).single());
@@ -1102,12 +1145,15 @@
    * la ficha del paciente entera.
    */
   const archivosDePaciente = async (pacienteId) => {
-    const r = await opcional(
-      sb.from('archivos').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }),
-      { data: [], error: null },
-      { objeto: 'archivos' });
-
-    const rows = r.data || [];
+    const rows = [];
+    for (let desde = 0; ; desde += 1000) {
+      const r = await opcional(
+        sb.from('archivos').select('*').eq('paciente_id', pacienteId).order('creado_en', { ascending: false }).order('id').range(desde, desde + 999),
+        { data: [], error: null }, { objeto: 'archivos' });
+      const pagina = r.data || [];
+      rows.push(...pagina);
+      if (pagina.length < 1000) break;
+    }
     return Promise.all(rows.map(async (a) => ({
       ...a,
       es_pdf: a.mime === 'application/pdf',
@@ -1822,7 +1868,7 @@
     'listarEjercicios', 'guardarEjercicio', 'eliminarEjercicio',
     'agregarOpcionValoracion', 'eliminarOpcionValoracion',
     'registrarPago', 'actualizarPago', 'eliminarPago', 'ingresosSemana',
-    'obtenerNota', 'historialNotas', 'editarNota', 'guardarValoracion', 'crearNota', 'cambiarFechaNota', 'agregarAdjunto', 'eliminarNota',
+    'obtenerNota', 'historialNotas', 'guardarValoracion', 'crearNota', 'cambiarFechaNota', 'agregarAdjunto', 'eliminarNota',
     'subirArchivo', 'eliminarArchivo', 'enlaceDeArchivo',
     'guardarRutina', 'activarRutina', 'eliminarRutina',
     'guardarPromocion', 'eliminarPromocion',
@@ -1894,7 +1940,7 @@
     valoracionDePaciente, guardarValoracion, historialValoraciones,
     opcionesValoracion, agregarOpcionValoracion, eliminarOpcionValoracion,
     listarEjercicios, guardarEjercicio, eliminarEjercicio,
-    obtenerNota, historialNotas, editarNota, notasDePaciente, crearNota, cambiarFechaNota, agregarAdjunto, eliminarNota,
+    obtenerNota, historialNotas, notasDePaciente, crearNota, cambiarFechaNota, agregarAdjunto, eliminarNota,
     archivosDePaciente, subirArchivo, eliminarArchivo, enlaceDeArchivo,
     rutinasDePaciente, rutinaActiva, guardarRutina, activarRutina, eliminarRutina,
     listarPromociones, guardarPromocion, eliminarPromocion,
@@ -1911,6 +1957,7 @@
     // `getConfig` está aquí porque la pantalla de acceso pinta la marca antes
     // de que exista sesión; su lectura ya es pública por RLS.
     _impl: 'supabase',
+    _autorizarOffline: _autorizar,
     sb,
     auth,
     getConfig,

@@ -53,6 +53,6 @@ begin
     where id = nota_id returning * into actual;
   return actual;
 end $$;
-revoke all on function public.editar_nota_versionada(uuid,integer,jsonb) from public, anon;
-grant execute on function public.editar_nota_versionada(uuid,integer,jsonb) to authenticated;
+-- Compatibilidad histórica: el editor de contenido ya no se ofrece al cliente.
+revoke all on function public.editar_nota_versionada(uuid,integer,jsonb) from public, anon, authenticated;
 commit;

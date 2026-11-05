@@ -1353,7 +1353,7 @@
                       <p class="text-[11px] font-medium text-ink-400">${E(fmtDateTime(n.fecha_nota || n.creado_en))}</p>
                       ${autoriaRegistro(n)}
                       <div class="mt-3 flex flex-wrap gap-3">
-                        <button data-action="editar-nota" data-id="${E(n.id)}" data-paciente="${E(p.id)}" class="min-h-[44px] rounded-xl bg-brand-600 px-4 py-2 text-[12px] font-bold text-white">Editar nota</button>
+                        <button data-action="fecha-nota" data-id="${E(n.id)}" data-fecha="${E(n.fecha_nota || n.creado_en)}" class="min-h-[44px] rounded-xl bg-brand-600 px-4 py-2 text-[12px] font-bold text-white">Cambiar fecha</button>
                         <button data-action="historial-nota" data-id="${E(n.id)}" class="min-h-[44px] rounded-xl border border-ink-200 bg-white px-4 py-2 text-[12px] font-bold text-ink-700">Ver versiones anteriores</button>
                       </div>
                     </div>
@@ -2963,11 +2963,10 @@
     }).join('') || '<p>Sin versiones registradas.</p>' });
   }
 
-  async function sheetNota(pacienteId, notaId = null) {
-    const nota = notaId ? await API.obtenerNota(notaId) : null;
-    const adjuntos = [...(nota?.adjuntos || [])];
+  async function sheetNota(pacienteId) {
+    const adjuntos = [];
     openSheet({
-      title: nota ? 'Editar nota de evolución' : 'Nota de evolución',
+      title: 'Nota de evolución',
       subtitle: 'Registro clínico de la sesión',
       size: 'tall',
       body: `
@@ -3005,15 +3004,8 @@
         </div>`,
       footer: `<button id="btn-guardar-nota" class="w-full rounded-xl bg-brand-600 py-3.5 text-[14px] font-extrabold text-white active:scale-[.98]">Guardar nota</button>`,
       onMount: (root) => {
-        if (nota) {
-          root.querySelector('#f-nota-fecha').value = toLocalInput(nota.fecha_nota || nota.creado_en);
-          root.querySelector('#f-nota-texto').value = nota.texto;
-          root.querySelector('#f-nota-eva').value = nota.eva ?? 0;
-          for (const k of ['ta', 'tem', 'fc', 'fr']) root.querySelector('#f-nota-' + k).value = nota.signos_vitales?.[k] ?? '';
-          root.querySelector('#btn-guardar-nota').textContent = 'Guardar nueva versión';
-        }
         const out = root.querySelector('#out-eva');
-        out.textContent = (nota?.eva ?? 0) + '/10';
+        out.textContent = '0/10';
         root.querySelector('#f-nota-eva').addEventListener('input', (e) => {
           const v = Number(e.target.value);
           out.textContent = `${v}/10`;
@@ -3060,8 +3052,7 @@
             eva: Number(root.querySelector('#f-nota-eva').value),
             adjuntos
           };
-          if (nota) await API.editarNota(nota.id, cambios, nota.revision || 1);
-          else await API.crearNota(cambios);
+          await API.crearNota(cambios);
           closeSheet();
           toast('Nota guardada');
           App.render();
@@ -3138,7 +3129,7 @@
    */
   async function verArchivo(id) {
     const a = await API.enlaceDeArchivo(id);
-    if (!a || !a.url) return toast('No se pudo abrir el archivo. Puede que ya no esté en el almacenamiento.', 'error', 4500);
+    if (!a || !a.url) return toast(navigator.onLine === false ? 'Este archivo no está descargado. Conéctate y descárgalo desde Mi cuenta → Archivos sin conexión.' : 'No se pudo abrir el archivo. Puede que ya no esté en el almacenamiento.', 'warn', 5000);
 
     // El PDF lo pinta el visor del navegador, que siempre lo hará mejor que
     // un <iframe> dentro de un panel de 480 px.

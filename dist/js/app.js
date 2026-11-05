@@ -9,6 +9,7 @@
   'use strict';
 
   const { icon, escapeHtml: E, avatar, toast, openSheet, closeSheet, confirmSheet } = UI;
+  if (global.Offline && global.API) Offline.install(API);
 
   /* ======================================================================
      RUTAS  ·  `rol` es la autorización de la pantalla
@@ -350,6 +351,7 @@
     const destino = INICIO[rol()];
     if (location.hash !== destino) location.hash = destino;
     else await render();
+    if (global.Offline) { Offline.prepare(); window.dispatchEvent(new Event('clidanfi-offline')); }
   }
 
   async function salir() {
@@ -370,7 +372,6 @@
 
   function sheetCuenta() {
     const p = estado.sesion.perfil;
-    const url = (global.CLIDANFI_ENV || {}).SUPABASE_URL || '';
     const esFisio = p.rol === 'fisio';
 
     openSheet({
@@ -378,6 +379,10 @@
       subtitle: estado.sesion.user.email,
       body: `
         <div class="space-y-2">
+          <button data-action="abrir-descargas" class="offline-account-button w-full rounded-xl border border-amber-300 bg-amber-100 p-3 text-left text-amber-950 active:bg-amber-200">
+            <span class="block text-[13.5px] font-bold">Almacenamiento y archivos sin conexión</span>
+            <span class="block text-[11.5px] text-ink-500">Últimos 7 días · Descargas y limpieza de este dispositivo</span>
+          </button>
           <div class="flex items-center gap-3 rounded-xl bg-brand-50 p-3">
             ${avatar(p.nombre || estado.sesion.user.email, 'h-11 w-11 text-[13px]')}
             <div class="min-w-0 flex-1">
@@ -391,10 +396,9 @@
           <div class="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
             <span class="mt-0.5 text-emerald-600">${icon('shield', 'h-4 w-4')}</span>
             <div class="min-w-0">
-              <p class="text-[12.5px] font-extrabold text-emerald-800">Conectado a Supabase</p>
-              <p class="mt-0.5 break-all text-[11px] font-mono leading-snug text-emerald-700">${E(url)}</p>
+              <p class="text-[12.5px] font-extrabold text-emerald-800">${global.Offline && !Offline.online() ? 'Modo sin conexión' : 'Con conexión'}</p>
               <p class="mt-1 text-[11.5px] leading-snug text-emerald-700">
-                El acceso lo controlan las políticas RLS del servidor.
+                Consulta las descargas, los cambios pendientes y la última sincronización en el apartado de almacenamiento.
               </p>
             </div>
           </div>
@@ -536,6 +540,7 @@
      DELEGACIÓN DE EVENTOS  ·  data-action="…"
      ====================================================================== */
   const ACCIONES = {
+    'abrir-descargas': () => OfflineProfile.show(),
     /* --- sesión y navegación --- */
     'abrir-cuenta':  () => sheetCuenta(),
     'abrir-clinica': () => VistaFisio.sheetClinica(),
@@ -566,10 +571,9 @@
     'registrar-asistencia': (el) => VistaFisio.sheetAsistencia(el.dataset.id),
     'abrir-valoracion':     (el) => { location.hash = `#/t/valoracion/${el.dataset.id}`; },
     'nueva-nota':           (el) => VistaFisio.sheetNota(el.dataset.id),
-    'editar-nota': (el) => VistaFisio.sheetNota(el.dataset.paciente, el.dataset.id),
     'historial-nota': (el) => VistaFisio.sheetHistorialNota(el.dataset.id),
     'fecha-nota':           (el) => VistaFisio.sheetFechaNota(el.dataset.id, el.dataset.fecha),
-    'ver-foto':             (el) => VistaFisio.sheetFoto(el.dataset.url, el.dataset.titulo),
+    'ver-foto':             (el) => el.dataset.url && el.dataset.url !== 'null' ? VistaFisio.sheetFoto(el.dataset.url, el.dataset.titulo) : toast('Esta foto no está descargada. Descárgala desde Mi cuenta con conexión.', 'warn', 5000),
     'ver-archivo':          (el) => VistaFisio.verArchivo(el.dataset.id),
 
     'borrar-nota': async (el) => {
@@ -780,7 +784,7 @@
     API.auth.onCambio(async (sesion) => {
       const antes = estado.sesion ? estado.sesion.user.id : null;
       const ahora = sesion ? sesion.user.id : null;
-      if (antes === ahora) return;
+      if (antes === ahora && estado.sesion?.perfil.rol === sesion?.perfil.rol) return;
       estado.sesion = sesion;
       closeSheet();
       await render();
@@ -796,6 +800,7 @@
 
     if (autenticado() && !location.hash) location.hash = INICIO[rol()];
     render();
+    if (autenticado() && global.Offline) { Offline.prepare(); window.dispatchEvent(new Event('clidanfi-offline')); }
   });
 
   global.App = {

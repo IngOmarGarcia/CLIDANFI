@@ -1,24 +1,61 @@
 /* ==========================================================================
    CLIDANFI · sw.js  ·  Service Worker
 
-   Su único trabajo es recibir las notificaciones que manda el Worker de
-   Cloudflare y abrir la pantalla correcta cuando el fisio las toca.
-
-   NO cachea nada. Es deliberado: un service worker que sirve archivos
-   guardados es la forma más rápida de que el fisio siga viendo la versión de
-   la semana pasada después de un despliegue, y aquí eso significaría trabajar
-   sobre una agenda desactualizada. El caché lo gobiernan las cabeceras de
-   Cloudflare, que es donde se puede corregir sin esperar a que caduque nada.
+   Recibe notificaciones y conserva una versión completa de la aplicación
+   para arrancar sin red. La agenda y los expedientes se guardan por cuenta
+   en IndexedDB, separados de esta caché pública de recursos.
 
    Vive en la RAÍZ del sitio a propósito: un service worker solo controla su
    propia carpeta hacia abajo, y desde `/js/` no podría gobernar `/`.
    ========================================================================== */
 
-// Un service worker nuevo se queda «esperando» hasta que se cierran todas las
-// pestañas. Para avisos eso es inaceptable: el fisio actualizaría y seguiría
-// con el de antes. Estas dos líneas hacen que el nuevo tome el control ya.
-self.addEventListener('install', (e) => e.waitUntil(self.skipWaiting()));
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+// Las actualizaciones esperan al cierre de las pestañas para no mezclar
+// versiones ni interrumpir la captura de información clínica.
+// El build sustituye estos valores por una lista y una versión de contenido.
+const SHELL_VERSION = 'offline-dev-1';
+const SHELL_FILES = null;
+const SHELL_CACHE = `clidanfi-shell-${SHELL_VERSION}`;
+const LOCAL_PREVIEW = ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
+self.addEventListener('install', event => event.waitUntil((async () => {
+  const cache = await caches.open(SHELL_CACHE);
+  let files = SHELL_FILES;
+  if (!files) {
+    const response = await fetch('/index.html', { cache: 'reload' });
+    if (!response.ok) throw new Error('No se pudo preparar la aplicación.');
+    const html = await response.text();
+    files = ['/index.html', '/manifest.webmanifest', '/assets/logo-clidanfi.jpeg',
+      ...Array.from(html.matchAll(/(?:src|href)="(\.\/(?:js|css)\/[^\"]+)"/g), m => m[1].slice(1))];
+  }
+  await cache.addAll(files);
+  if (LOCAL_PREVIEW) await self.skipWaiting();
+  // No forzar la actualización en mitad de una consulta o un formulario.
+})()));
+self.addEventListener('activate', event => event.waitUntil((async () => {
+  for (const key of await caches.keys()) if (key.startsWith('clidanfi-shell-') && key !== SHELL_CACHE) await caches.delete(key);
+  await self.clients.claim();
+})()));
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (LOCAL_PREVIEW && (event.request.mode === 'navigate' || /^\/(?:js\/|css\/|assets\/|manifest\.webmanifest$)/.test(url.pathname))) {
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(event.request, { cache: 'no-store' });
+        if (response.ok) return response;
+      } catch { /* sin conexión: conservar el arranque desde la copia preparada */ }
+      const cache = await caches.open(SHELL_CACHE);
+      const cached = await cache.match(event.request.mode === 'navigate' ? '/index.html' : event.request);
+      return cached || fetch(event.request);
+    })());
+    return;
+  }
+  // Supabase y los archivos clínicos nunca pasan por esta caché compartida.
+  if (event.request.mode === 'navigate') {
+    event.respondWith((async () => (await (await caches.open(SHELL_CACHE)).match('/index.html')) || fetch(event.request))());
+  } else if (/^\/(?:js\/|css\/|assets\/|manifest\.webmanifest$)/.test(url.pathname)) {
+    event.respondWith((async () => (await (await caches.open(SHELL_CACHE)).match(event.request)) || fetch(event.request))());
+  }
+});
 
 /* --------------------------------------------------------------------------
    Llega una notificación

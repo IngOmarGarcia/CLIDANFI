@@ -1,0 +1,6 @@
+# CLIDANFI · enrutado en Cloudflare Pages
+#
+# El router es por hash (#/t/dashboard): el servidor recibe «/» y no necesita
+# reescrituras. Workers Assets rechaza el catch-all a /index.html porque su
+# normalización de URLs lo convierte en un bucle. El fallback de navegación
+# se configura en wrangler.toml; los archivos existentes se sirven directamente.

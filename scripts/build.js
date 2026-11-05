@@ -65,7 +65,7 @@ const copiar = (rel) => {
 // `sw.js` va en la RAÍZ y no dentro de js/: un service worker solo controla
 // su propia carpeta hacia abajo, así que desde /js/ no podría gobernar el
 // sitio entero ni atender las notificaciones.
-['index.html', 'sw.js', 'css', 'js', 'assets', '_headers', '_redirects', 'robots.txt'].forEach(copiar);
+['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 'assets', '_headers', '_redirects', 'robots.txt'].forEach(copiar);
 
 // Cada script y hoja de estilos lleva la versión de su contenido en la URL.
 // Un navegador con CSS antiguo guardado debe pedir la nueva URL al publicar.
@@ -79,6 +79,25 @@ const htmlVersionado = fs.readFileSync(htmlRuta, 'utf8').replace(
   }
 );
 fs.writeFileSync(htmlRuta, htmlVersionado);
+
+// Precaché atómica de una versión completa; los datos clínicos viven en IndexedDB.
+const shellFiles = ['/index.html', '/manifest.webmanifest'];
+const collectShell = dir => {
+  for (const entry of fs.readdirSync(path.join(DIST, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) collectShell(rel);
+    else shellFiles.push('/' + rel);
+  }
+};
+['js', 'css', 'assets'].forEach(collectShell);
+for (const match of htmlVersionado.matchAll(/(?:src|href)="(\.\/(?:js|css)\/[^\"]+)"/g)) shellFiles.push(match[1].slice(1));
+const shellHash = crypto.createHash('sha256');
+for (const rel of shellFiles) shellHash.update(fs.readFileSync(path.join(DIST, rel.split('?')[0].slice(1))));
+const swPath = path.join(DIST, 'sw.js');
+const swSource = fs.readFileSync(swPath, 'utf8');
+shellHash.update(swSource);
+fs.writeFileSync(swPath, swSource.replace("'offline-dev-1'", JSON.stringify(shellHash.digest('hex').slice(0,16)))
+  .replace('const SHELL_FILES = null;', `const SHELL_FILES = ${JSON.stringify([...new Set(shellFiles)])};`));
 
 /* --- 4 · verificaciones de salida ----------------------------------------- */
 const problemas = [];

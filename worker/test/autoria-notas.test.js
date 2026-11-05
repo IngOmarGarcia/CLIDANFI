@@ -22,6 +22,10 @@ test('autoría desde sesión, historial completo y rechazo de edición desactual
     await db.exec(await readFile(new URL('../../supabase/documentos-respaldo.sql', import.meta.url), 'utf8'));
     const sql = await readFile(new URL('../../supabase/autoria-notas.sql', import.meta.url), 'utf8');
     await db.exec(sql); await db.exec(sql);
+    const retirarEditor = await readFile(new URL('../../supabase/desactivar-edicion-notas.sql', import.meta.url), 'utf8');
+    await db.exec(retirarEditor); await db.exec(retirarEditor);
+    assert.equal((await db.query("select has_function_privilege('authenticated','public.editar_nota_versionada(uuid,integer,jsonb)','execute') permite")).rows[0].permite, false);
+    assert.equal((await db.query("select has_function_privilege('anon','public.editar_nota_versionada(uuid,integer,jsonb)','execute') permite")).rows[0].permite, false);
     const dana = '00000000-0000-0000-0000-000000000001';
     const otro = '00000000-0000-0000-0000-000000000002';
     await db.query("insert into perfiles(id,nombre) values($1,'Dana'),($2,'Otro fisio')", [dana,otro]);

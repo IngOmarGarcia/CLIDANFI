@@ -15,8 +15,10 @@
     "test:calendario": "node scripts/test-calendario.js && node scripts/test-estadisticas-citas.js",
     "test:fechas": "node scripts/test-fechas.js",
     "test:eventos": "node scripts/test-eventos-calendario.js",
+    "test:offline": "node scripts/test-offline.js",
+    "test:offline-browser": "node scripts/test-offline-sw.js && node scripts/test-offline-browser.js",
     "test:worker": "node --test \"worker/test/*.test.js\"",
-    "test": "npm run check && npm run test:esquema && npm run test:subidas && npm run test:funciones && npm run test:navegacion && npm run test:calendario && npm run test:fechas && npm run test:eventos && npm run test:worker",
+    "test": "npm run check && npm run test:esquema && npm run test:subidas && npm run test:funciones && npm run test:navegacion && npm run test:calendario && npm run test:fechas && npm run test:eventos && npm run test:worker && npm run test:offline",
     "css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --minify",
     "css:watch": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --watch",
     "dev": "npm run env && npm run vendor && npm run css:watch",
@@ -29,6 +31,8 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10",
     "dotenv": "^17.4.2",
+    "fake-indexeddb": "^6.2.7",
+    "playwright-core": "^1.64.1",
     "tailwindcss": "^3.4.17"
   },
   "engines": {

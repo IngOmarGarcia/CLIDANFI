@@ -73,7 +73,24 @@
         detectSessionInUrl: true,   // necesario para el enlace de recuperación
         storageKey: 'clidanfi.auth'
       },
-      global: { headers: { 'x-client-info': 'clidanfi-web' } }
+      global: {
+        headers: { 'x-client-info': 'clidanfi-web' },
+        fetch: async (input, options = {}) => {
+          const controller = new AbortController();
+          const abort = () => controller.abort();
+          if (options.signal?.aborted) abort();
+          options.signal?.addEventListener('abort', abort, { once: true });
+          const timer = setTimeout(abort, 12000);
+          try { return await global.fetch(input, { ...options, signal: controller.signal }); }
+          catch (error) {
+            if (controller.signal.aborted && !options.signal?.aborted) throw new Error('Network request failed: tiempo de espera agotado.');
+            throw error;
+          } finally {
+            clearTimeout(timer);
+            options.signal?.removeEventListener('abort', abort);
+          }
+        }
+      }
     });
     global.CLIDANFI_LISTO = true;
     console.info('[CLIDANFI] Cliente de Supabase inicializado →', URL);

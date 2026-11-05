@@ -7,6 +7,7 @@
   <meta name="description" content="CLIDANFI · Sistema de gestión para clínica de fisioterapia" />
   <meta name="robots" content="noindex, nofollow" />
   <title>CLIDANFI · Gestión Clínica</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
 
   <!-- El logo por defecto es el respaldo: si la clínica sube el suyo desde
        «Mi cuenta → Personalizar clínica», app.js reescribe estos href. -->
@@ -18,8 +19,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
   <!-- Tailwind COMPILADO (npm run css). Sin CDN en producción. -->
-  <link rel="stylesheet" href="./css/tailwind.css?v=609f8fcd5a46" />
-  <link rel="stylesheet" href="./css/styles.css?v=376599e5cc79" />
+  <link rel="stylesheet" href="./css/tailwind.css?v=83ac54bfd102" />
+  <link rel="stylesheet" href="./css/styles.css?v=0d99c1c130dc" />
 </head>
 
 <body class="app-bg font-sans text-ink-900 antialiased">
@@ -103,18 +104,20 @@
 
   <!-- 2 · Cliente de Supabase: librería + inicialización global -->
   <script src="./js/vendor/supabase.js?v=7396012594aa"></script>
-  <script src="./js/supabase-client.js?v=6c21ba43f6e3"></script>
+  <script src="./js/supabase-client.js?v=f3189cc6e2a8"></script>
 
   <!-- 3 · Aplicación -->
   <script src="./js/ui.js?v=b35a88ecc612"></script>
   <script src="./js/motion-ui.js?v=2e3e5ea3c506"></script>
   <script src="./js/store.js?v=abacde63afb1"></script>
-  <script src="./js/api.js?v=c39923e9ffe8"></script>
+  <script src="./js/offline.js?v=507ea5cc3f7f"></script>
+  <script src="./js/api.js?v=06b6a80c72c5"></script>
+  <script src="./js/offline-profile.js?v=373c9f3c6037"></script>
   <script src="./js/views-auth.js?v=59de2613cc6b"></script>
   <script src="./js/calendar-events.js?v=51dae32fa94d"></script>
   <script src="./js/estadisticas-citas.js?v=a7de48496d27"></script>
-  <script src="./js/views-therapist.js?v=bb6ba056f682"></script>
+  <script src="./js/views-therapist.js?v=6e814532c7fd"></script>
   <script src="./js/views-patient.js?v=82910431b74b"></script>
-  <script src="./js/app.js?v=a32b6baa464a"></script>
+  <script src="./js/app.js?v=5788f517fb8c"></script>
 </body>
 </html>
