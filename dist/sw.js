@@ -12,10 +12,19 @@
 // Las actualizaciones esperan al cierre de las pestañas para no mezclar
 // versiones ni interrumpir la captura de información clínica.
 // El build sustituye estos valores por una lista y una versión de contenido.
-const SHELL_VERSION = "c6b9ce91df898314";
+const SHELL_VERSION = "2a804cab1481006f";
 const SHELL_FILES = ["/index.html","/manifest.webmanifest","/js/api.js","/js/app.js","/js/calendar-events.js","/js/env.js","/js/estadisticas-citas.js","/js/motion-ui.js","/js/offline-profile.js","/js/offline.js","/js/store.js","/js/supabase-client.js","/js/ui.js","/js/vendor/supabase.js","/js/views-auth.js","/js/views-patient.js","/js/views-therapist.js","/css/styles.css","/css/tailwind.css","/assets/icon-192.png","/assets/icon-512.png","/assets/logo-clidanfi.jpeg","/css/tailwind.css?v=83ac54bfd102","/css/styles.css?v=0d99c1c130dc","/js/env.js?v=46d161ead8f8","/js/vendor/supabase.js?v=7396012594aa","/js/supabase-client.js?v=f3189cc6e2a8","/js/ui.js?v=b35a88ecc612","/js/motion-ui.js?v=2e3e5ea3c506","/js/store.js?v=abacde63afb1","/js/offline.js?v=507ea5cc3f7f","/js/api.js?v=06b6a80c72c5","/js/offline-profile.js?v=373c9f3c6037","/js/views-auth.js?v=59de2613cc6b","/js/calendar-events.js?v=51dae32fa94d","/js/estadisticas-citas.js?v=a7de48496d27","/js/views-therapist.js?v=6e814532c7fd","/js/views-patient.js?v=82910431b74b","/js/app.js?v=5788f517fb8c"];
 const SHELL_CACHE = `clidanfi-shell-${SHELL_VERSION}`;
 const LOCAL_PREVIEW = ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
+// Workers Assets redirige /index.html a /. Chrome no permite reutilizar esa
+// respuesta redirigida en una navegación cuyo redirect mode es manual.
+// Reconstruirla conserva el HTML y sus cabeceras sin arrastrar la redirección.
+async function navigationResponse(response) {
+  if (!response || !response.redirected) return response;
+  return new Response(await response.arrayBuffer(), {
+    status: response.status, statusText: response.statusText, headers: response.headers
+  });
+}
 self.addEventListener('install', event => event.waitUntil((async () => {
   const cache = await caches.open(SHELL_CACHE);
   let files = SHELL_FILES;
@@ -45,13 +54,17 @@ self.addEventListener('fetch', event => {
       } catch { /* sin conexión: conservar el arranque desde la copia preparada */ }
       const cache = await caches.open(SHELL_CACHE);
       const cached = await cache.match(event.request.mode === 'navigate' ? '/index.html' : event.request);
-      return cached || fetch(event.request);
+      return event.request.mode === 'navigate'
+        ? navigationResponse(cached || await fetch(event.request))
+        : cached || fetch(event.request);
     })());
     return;
   }
   // Supabase y los archivos clínicos nunca pasan por esta caché compartida.
   if (event.request.mode === 'navigate') {
-    event.respondWith((async () => (await (await caches.open(SHELL_CACHE)).match('/index.html')) || fetch(event.request))());
+    event.respondWith((async () => navigationResponse(
+      (await (await caches.open(SHELL_CACHE)).match('/index.html')) || await fetch(event.request)
+    ))());
   } else if (/^\/(?:js\/|css\/|assets\/|manifest\.webmanifest$)/.test(url.pathname)) {
     event.respondWith((async () => (await (await caches.open(SHELL_CACHE)).match(event.request)) || fetch(event.request))());
   }

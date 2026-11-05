@@ -16,7 +16,7 @@
     "test:fechas": "node scripts/test-fechas.js",
     "test:eventos": "node scripts/test-eventos-calendario.js",
     "test:offline": "node scripts/test-offline.js",
-    "test:offline-browser": "node scripts/test-offline-sw.js && node scripts/test-offline-browser.js",
+    "test:offline-browser": "node scripts/test-offline-sw.js && node scripts/test-offline-redirect.js && node scripts/test-offline-browser.js",
     "test:worker": "node --test \"worker/test/*.test.js\"",
     "test": "npm run check && npm run test:esquema && npm run test:subidas && npm run test:funciones && npm run test:navegacion && npm run test:calendario && npm run test:fechas && npm run test:eventos && npm run test:worker && npm run test:offline",
     "css": "tailwindcss -i ./css/input.css -o ./css/tailwind.css --minify",

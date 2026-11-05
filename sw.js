@@ -16,6 +16,15 @@ const SHELL_VERSION = 'offline-dev-1';
 const SHELL_FILES = null;
 const SHELL_CACHE = `clidanfi-shell-${SHELL_VERSION}`;
 const LOCAL_PREVIEW = ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
+// Workers Assets redirige /index.html a /. Chrome no permite reutilizar esa
+// respuesta redirigida en una navegación cuyo redirect mode es manual.
+// Reconstruirla conserva el HTML y sus cabeceras sin arrastrar la redirección.
+async function navigationResponse(response) {
+  if (!response || !response.redirected) return response;
+  return new Response(await response.arrayBuffer(), {
+    status: response.status, statusText: response.statusText, headers: response.headers
+  });
+}
 self.addEventListener('install', event => event.waitUntil((async () => {
   const cache = await caches.open(SHELL_CACHE);
   let files = SHELL_FILES;
@@ -45,13 +54,17 @@ self.addEventListener('fetch', event => {
       } catch { /* sin conexión: conservar el arranque desde la copia preparada */ }
       const cache = await caches.open(SHELL_CACHE);
       const cached = await cache.match(event.request.mode === 'navigate' ? '/index.html' : event.request);
-      return cached || fetch(event.request);
+      return event.request.mode === 'navigate'
+        ? navigationResponse(cached || await fetch(event.request))
+        : cached || fetch(event.request);
     })());
     return;
   }
   // Supabase y los archivos clínicos nunca pasan por esta caché compartida.
   if (event.request.mode === 'navigate') {
-    event.respondWith((async () => (await (await caches.open(SHELL_CACHE)).match('/index.html')) || fetch(event.request))());
+    event.respondWith((async () => navigationResponse(
+      (await (await caches.open(SHELL_CACHE)).match('/index.html')) || await fetch(event.request)
+    ))());
   } else if (/^\/(?:js\/|css\/|assets\/|manifest\.webmanifest$)/.test(url.pathname)) {
     event.respondWith((async () => (await (await caches.open(SHELL_CACHE)).match(event.request)) || fetch(event.request))());
   }
